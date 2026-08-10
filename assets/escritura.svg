@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" role="img" aria-label="Lapiceros">
+  <rect width="640" height="360" fill="#eaf3f7"/>
+  <g transform="rotate(-22 320 180)">
+    <rect x="158" y="145" width="306" height="34" rx="17" fill="#1e1e1e"/>
+    <rect x="198" y="145" width="190" height="34" fill="#ffd35a"/>
+    <rect x="388" y="145" width="58" height="34" fill="#2f6f9f"/>
+    <path d="M464 145l54 17-54 17z" fill="#ffffff"/>
+    <path d="M510 162l26 8-26 9z" fill="#1e1e1e"/>
+  </g>
+  <path d="M184 254c46 21 154 27 256-8" fill="none" stroke="#f4b000" stroke-width="12" stroke-linecap="round"/>
+</svg>

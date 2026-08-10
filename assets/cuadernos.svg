@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" role="img" aria-label="Cuaderno">
+  <rect width="640" height="360" fill="#fff3cf"/>
+  <rect x="204" y="54" width="236" height="252" rx="16" fill="#2f6f9f"/>
+  <rect x="236" y="54" width="204" height="252" rx="16" fill="#ffffff"/>
+  <path d="M266 106h134M266 150h134M266 194h134M266 238h92" stroke="#d9d2c6" stroke-width="10" stroke-linecap="round"/>
+  <path d="M214 86h46M214 128h46M214 170h46M214 212h46M214 254h46" stroke="#1e1e1e" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="192" cy="86" r="10" fill="#f4b000"/>
+  <circle cx="192" cy="128" r="10" fill="#f4b000"/>
+  <circle cx="192" cy="170" r="10" fill="#f4b000"/>
+  <circle cx="192" cy="212" r="10" fill="#f4b000"/>
+  <circle cx="192" cy="254" r="10" fill="#f4b000"/>
+</svg>

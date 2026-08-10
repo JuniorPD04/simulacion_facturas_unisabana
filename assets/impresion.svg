@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" role="img" aria-label="Papel e impresion">
+  <rect width="640" height="360" fill="#f8f1e5"/>
+  <rect x="176" y="112" width="288" height="146" rx="18" fill="#1e1e1e"/>
+  <rect x="218" y="60" width="204" height="100" rx="8" fill="#ffffff" stroke="#d9d2c6" stroke-width="8"/>
+  <rect x="218" y="210" width="204" height="92" rx="8" fill="#ffffff" stroke="#d9d2c6" stroke-width="8"/>
+  <path d="M250 95h140M250 126h104M250 242h140M250 270h96" stroke="#2f6f9f" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="420" cy="160" r="14" fill="#ffd35a"/>
+</svg>

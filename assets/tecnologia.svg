@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" role="img" aria-label="Memoria USB">
+  <rect width="640" height="360" fill="#edf4ff"/>
+  <rect x="192" y="130" width="212" height="100" rx="28" fill="#2f6f9f"/>
+  <rect x="390" y="150" width="78" height="60" rx="10" fill="#1e1e1e"/>
+  <rect x="456" y="162" width="34" height="36" rx="5" fill="#d9d2c6"/>
+  <path d="M230 180h126" stroke="#ffd35a" stroke-width="16" stroke-linecap="round"/>
+  <circle cx="242" cy="180" r="10" fill="#ffffff"/>
+</svg>

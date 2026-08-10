@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" role="img" aria-label="Elementos de oficina">
+  <rect width="640" height="360" fill="#eef7ee"/>
+  <rect x="158" y="116" width="232" height="154" rx="12" fill="#ffffff" stroke="#1f7a54" stroke-width="10"/>
+  <path d="M188 158h170M188 196h128M188 234h150" stroke="#d9d2c6" stroke-width="10" stroke-linecap="round"/>
+  <rect x="380" y="92" width="92" height="190" rx="16" fill="#ffd35a" stroke="#1e1e1e" stroke-width="10"/>
+  <path d="M406 128h40M406 164h40M406 200h40M406 236h40" stroke="#1e1e1e" stroke-width="8" stroke-linecap="round"/>
+</svg>
