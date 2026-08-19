@@ -3,101 +3,46 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Generador de facturas | Papel y Luna</title>
+  <title>POS Papel y Luna</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
-  <header class="app-header">
-    <div class="brand">
-      <img src="assets/logo_papel_y_luna.jpg" alt="Logo Papel y Luna" class="brand__logo">
-      <div>
-        <p class="brand__eyebrow">Papelería y miscelánea</p>
-        <h1>Papel y Luna</h1>
-      </div>
-    </div>
-
-    <section class="team-card" aria-label="Integrantes del equipo">
-      <strong>Equipo</strong>
-      <span>Junior Perez Davila - 407721</span>
-      <span>Claudia Libertad Quispe Terrones - 407719</span>
-      <span>Samuel Andres Zona Malaver - 385387</span>
-    </section>
-  </header>
-
-  <main class="layout">
-    <section class="catalog-panel" aria-labelledby="catalog-title">
-      <div class="section-heading">
+  <div class="shell">
+    <aside class="nav">
+      <a class="brand" href="#venta">
+        <img src="assets/logo.svg" alt="Papel y Luna">
         <div>
-          <p class="section-heading__label">Catálogo</p>
-          <h2 id="catalog-title">Productos disponibles</h2>
+          <strong>Papel y Luna</strong>
+          <span>POS papelería</span>
         </div>
-        <span id="product-count" class="count-pill">0 productos</span>
-      </div>
+      </a>
 
-      <div class="toolbar">
-        <label class="search-box" for="search-input">
-          <span aria-hidden="true">Buscar</span>
-          <input id="search-input" type="search" placeholder="Nombre del producto">
-        </label>
-        <select id="category-filter" aria-label="Filtrar por categoría">
-          <option value="todos">Todas las categorías</option>
-        </select>
-      </div>
+      <nav aria-label="Módulos">
+        <a data-nav="venta" href="#venta">Nueva venta</a>
+        <a data-nav="productos" href="#productos">Productos</a>
+        <a data-nav="historial" href="#historial">Ventas</a>
+      </nav>
 
-      <div id="catalog-grid" class="catalog-grid" aria-live="polite"></div>
-    </section>
-
-    <aside class="invoice-panel" aria-labelledby="invoice-title">
-      <div class="invoice-header">
-        <div>
-          <p class="section-heading__label">Factura de venta</p>
-          <h2 id="invoice-title">Venta actual</h2>
-        </div>
-        <span class="invoice-number">No. PL-2026-001</span>
-      </div>
-
-      <div class="customer-box">
-        <label for="customer-name">Cliente</label>
-        <input id="customer-name" type="text" value="Consumidor final">
-      </div>
-
-      <div class="invoice-table" role="table" aria-label="Productos agregados a la factura">
-        <div class="invoice-row invoice-row--head" role="row">
-          <span>Producto</span>
-          <span>Cant.</span>
-          <span>Subtotal</span>
-          <span></span>
-        </div>
-        <div id="invoice-items"></div>
-      </div>
-
-      <div id="empty-state" class="empty-state">
-        <strong>Factura vacía</strong>
-        <span>Agrega productos desde el catálogo para iniciar la venta.</span>
-      </div>
-
-      <dl class="totals">
-        <div>
-          <dt>Subtotal</dt>
-          <dd id="subtotal-value">$0</dd>
-        </div>
-        <div>
-          <dt>IVA 19%</dt>
-          <dd id="tax-value">$0</dd>
-        </div>
-        <div class="totals__grand">
-          <dt>Total a pagar</dt>
-          <dd id="total-value">$0</dd>
-        </div>
-      </dl>
-
-      <div class="invoice-actions">
-        <button id="clear-invoice" class="button button--ghost" type="button">Limpiar</button>
-        <button id="print-invoice" class="button button--primary" type="button">Imprimir factura</button>
-      </div>
+      <section class="team" aria-label="Integrantes del equipo">
+        <strong>Equipo</strong>
+        <span>Junior Perez Davila · 407721</span>
+        <span>Claudia Libertad Quispe Terrones · 407719</span>
+        <span>Samuel Andres Zona Malaver · 385387</span>
+      </section>
     </aside>
-  </main>
 
+    <main id="view" class="view"></main>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+
+  <script src="js/utils.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/views-venta.js"></script>
+  <script src="js/views-productos.js"></script>
+  <script src="js/views-historial.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
