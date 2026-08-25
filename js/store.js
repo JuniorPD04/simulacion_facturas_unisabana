@@ -8,7 +8,8 @@
     currentSale: null,
     meta: {
       productSeq: 1,
-      saleSeq: 1
+      saleSeq: 1,
+      draftSeq: 1
     }
   };
 
@@ -32,6 +33,8 @@
   function emptySale() {
     return {
       id: PYL.utils.uid("sale"),
+      draftId: null,
+      draftNumero: "",
       items: [],
       cliente: "Consumidor final",
       metodoPago: "efectivo",
@@ -86,6 +89,47 @@
     return Math.max(0, Number(product.stock) - reservedQty(product.id));
   }
 
+  function warehouseStock(product) {
+    if (!product.seguimientoInventario) return Infinity;
+    return Math.max(0, Number(product.stock) || 0);
+  }
+
+  function reconcileDraftItems(items) {
+    var adjustments = [];
+    var next = [];
+
+    (items || []).forEach(function (item) {
+      var product = getProduct(item.productId);
+      if (!product) {
+        adjustments.push(item.nombre + " se quitó porque ya no está en el catálogo.");
+        return;
+      }
+
+      var qty = item.cantidad;
+      if (product.seguimientoInventario) {
+        var available = warehouseStock(product);
+        if (available <= 0) {
+          adjustments.push(product.nombre + " se quitó: no hay stock.");
+          return;
+        }
+        if (qty > available) {
+          adjustments.push(product.nombre + ": de " + qty + " a " + available + " und. (stock insuficiente).");
+          qty = available;
+        }
+      }
+
+      next.push({
+        productId: product.id,
+        codigoInterno: product.codigoInterno,
+        nombre: product.nombre,
+        precio: product.precio,
+        cantidad: qty
+      });
+    });
+
+    return { items: next, adjustments: adjustments };
+  }
+
   var Store = {
     init: function () {
       try {
@@ -100,17 +144,20 @@
           state.products = seedProducts();
           state.sales = [];
           state.currentSale = emptySale();
-          state.meta = { productSeq: 13, saleSeq: 1 };
+          state.meta = { productSeq: 13, saleSeq: 1, draftSeq: 1 };
           persist();
         }
       } catch (error) {
         state.products = seedProducts();
         state.sales = [];
         state.currentSale = emptySale();
-        state.meta = { productSeq: 13, saleSeq: 1 };
+        state.meta = { productSeq: 13, saleSeq: 1, draftSeq: 1 };
       }
 
       if (!state.currentSale) state.currentSale = emptySale();
+      if (!state.meta.draftSeq) state.meta.draftSeq = 1;
+      if (!state.currentSale.draftId) state.currentSale.draftId = null;
+      if (!state.currentSale.draftNumero) state.currentSale.draftNumero = "";
     },
 
     getProducts: function () {
@@ -287,6 +334,8 @@
       state.currentSale.items = [];
       state.currentSale.paso = "items";
       state.currentSale.valorRecibido = "";
+      state.currentSale.draftId = null;
+      state.currentSale.draftNumero = "";
       persist();
     },
 
@@ -298,6 +347,108 @@
     setSaleField: function (field, value) {
       state.currentSale[field] = value;
       persist();
+    },
+
+    previewDraftResume: function (id) {
+      var draft = this.getSale(id);
+      if (!draft || draft.estado !== "borrador") {
+        return { ok: false, message: "Ese borrador ya no existe." };
+      }
+      var reconciled = reconcileDraftItems(draft.items);
+      return {
+        ok: true,
+        draft: clone(draft),
+        items: reconciled.items,
+        adjustments: reconciled.adjustments,
+        empty: !reconciled.items.length
+      };
+    },
+
+    saveDraft: function () {
+      var sale = state.currentSale;
+      if (!sale || !sale.items.length) {
+        return { ok: false, message: "Agrega al menos un producto para guardar el borrador." };
+      }
+
+      var draftId = sale.draftId || sale.id;
+      var draftNumero = sale.draftNumero;
+      if (!draftNumero) {
+        draftNumero = "B-" + PYL.utils.pad(state.meta.draftSeq, 4);
+        state.meta.draftSeq += 1;
+      }
+
+      var draft = {
+        id: draftId,
+        numero: draftNumero,
+        fecha: new Date().toISOString(),
+        cliente: String(sale.cliente || "").trim() || "Consumidor final",
+        items: clone(sale.items),
+        total: saleTotal(sale.items),
+        metodoPago: sale.metodoPago,
+        valorRecibido: sale.valorRecibido,
+        cambio: 0,
+        estado: "borrador"
+      };
+
+      var existing = state.sales.findIndex(function (entry) {
+        return entry.id === draftId;
+      });
+      if (existing !== -1) state.sales.splice(existing, 1);
+      state.sales.unshift(draft);
+      state.currentSale = emptySale();
+      persist();
+      return { ok: true, sale: clone(draft) };
+    },
+
+    resumeDraft: function (id) {
+      var index = state.sales.findIndex(function (sale) {
+        return sale.id === id && sale.estado === "borrador";
+      });
+      if (index === -1) return { ok: false, message: "Ese borrador ya no existe." };
+
+      if (state.currentSale.items.length) {
+        var parked = this.saveDraft();
+        if (!parked.ok) return parked;
+        index = state.sales.findIndex(function (sale) {
+          return sale.id === id && sale.estado === "borrador";
+        });
+        if (index === -1) return { ok: false, message: "Ese borrador ya no existe." };
+      }
+
+      var draft = state.sales[index];
+      var reconciled = reconcileDraftItems(draft.items);
+      if (!reconciled.items.length) {
+        return {
+          ok: false,
+          empty: true,
+          adjustments: reconciled.adjustments,
+          message: "Ningún producto de este borrador tiene stock suficiente para continuar."
+        };
+      }
+
+      state.sales.splice(index, 1);
+      state.currentSale = {
+        id: PYL.utils.uid("sale"),
+        draftId: draft.id,
+        draftNumero: draft.numero,
+        items: reconciled.items,
+        cliente: draft.cliente || "Consumidor final",
+        metodoPago: draft.metodoPago || "efectivo",
+        valorRecibido: draft.valorRecibido || "",
+        paso: "items"
+      };
+      persist();
+      return { ok: true, adjustments: reconciled.adjustments, sale: clone(state.currentSale) };
+    },
+
+    discardDraft: function (id) {
+      var index = state.sales.findIndex(function (sale) {
+        return sale.id === id && sale.estado === "borrador";
+      });
+      if (index === -1) return { ok: false, message: "Ese borrador ya no existe." };
+      state.sales.splice(index, 1);
+      persist();
+      return { ok: true };
     },
 
     closeSale: function () {
@@ -365,7 +516,11 @@
     },
 
     getSales: function () {
-      return state.sales.slice();
+      return state.sales.slice().sort(function (a, b) {
+        if (a.estado === "borrador" && b.estado !== "borrador") return -1;
+        if (b.estado === "borrador" && a.estado !== "borrador") return 1;
+        return new Date(b.fecha) - new Date(a.fecha);
+      });
     },
 
     getSale: function (id) {

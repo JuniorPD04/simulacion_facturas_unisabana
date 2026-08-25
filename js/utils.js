@@ -82,6 +82,18 @@
     return '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M5 7h14M10 7V5h4v2M8 7l.8 12h6.4L16 7"/></svg>';
   }
 
+  function iconPlay() {
+    return '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M8 6.2v11.6L18.5 12z"/></svg>';
+  }
+
+  function iconEye() {
+    return '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M2.6 12s3.6-6.4 9.4-6.4S21.4 12 21.4 12s-3.6 6.4-9.4 6.4S2.6 12 2.6 12z"/><circle cx="12" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
+  }
+
+  function iconInvoice() {
+    return '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M7 3.5h7.2L19 8.2V20.5H7z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M14.2 3.5V8H19M9.4 12h5.2M9.4 15.4h5.2"/></svg>';
+  }
+
   PYL.utils = {
     escapeHtml: escapeHtml,
     formatCurrency: formatCurrency,
@@ -93,6 +105,9 @@
     paymentLabel: paymentLabel,
     categoryImage: categoryImage,
     iconPencil: iconPencil,
-    iconTrash: iconTrash
+    iconTrash: iconTrash,
+    iconPlay: iconPlay,
+    iconEye: iconEye,
+    iconInvoice: iconInvoice
   };
 })(window);

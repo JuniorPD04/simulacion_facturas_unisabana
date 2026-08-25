@@ -19,7 +19,7 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () {
       root.innerHTML = "";
-    }, 3200);
+    }, 4500);
   }
 
   function closeModal() {

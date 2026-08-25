@@ -189,7 +189,7 @@
 
     root.innerHTML =
       '<div class="ticket-head">' +
-        "<div><p>Venta en curso</p><h2>Ticket</h2></div>" +
+        "<div><p>" + (sale.draftNumero ? "Borrador " + u.escapeHtml(sale.draftNumero) : "Venta en curso") + "</p><h2>Ticket</h2></div>" +
         '<span class="pill">' + sale.items.length + (sale.items.length === 1 ? " ítem" : " ítems") + "</span>" +
       "</div>" +
       '<div class="ticket-list">' + ticketItemsHtml(sale) + "</div>" +
@@ -317,9 +317,13 @@
       }
 
       if (action === "clear-sale" && event.type === "click") {
+        var current = PYL.store.getCurrentSale();
+        var draftNote = current.draftNumero
+          ? " El borrador " + current.draftNumero + " se perderá."
+          : "";
         PYL.ui.confirm({
           title: "Limpiar venta",
-          message: "Se quitarán todos los productos de la venta en curso.",
+          message: "Se quitarán todos los productos de la venta en curso." + draftNote,
           confirmLabel: "Limpiar",
           danger: true
         }).then(function (ok) {
@@ -332,8 +336,14 @@
       }
 
       if (action === "save-sale" && event.type === "click") {
-        PYL.store.setSaleField("paso", "items");
-        PYL.ui.toast("Venta guardada. Puedes continuar después.", "ok");
+        var saved = PYL.store.saveDraft();
+        if (!saved.ok) {
+          PYL.ui.toast(saved.message, "error");
+          return;
+        }
+        renderCatalog();
+        renderTicket();
+        PYL.ui.toast("Borrador " + saved.sale.numero + " guardado en Ventas. Puedes retomarlo cuando quieras.", "ok");
         return;
       }
 
