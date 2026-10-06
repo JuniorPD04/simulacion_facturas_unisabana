@@ -11,7 +11,7 @@
   --ok: #1f6b4a;
   --danger: #b42318;
   --shadow: 0 18px 40px rgba(21, 35, 58, 0.08);
-  --radius: 14px;
+  --radius: 8px;
   --font: "Segoe UI", "Avenir Next", "Century Gothic", sans-serif;
   --mono: "Cascadia Mono", "Consolas", "Courier New", monospace;
 }
@@ -28,9 +28,7 @@ body {
 body {
   margin: 0;
   color: var(--ink);
-  background:
-    radial-gradient(circle at 12% -10%, rgba(200, 150, 10, 0.16), transparent 32%),
-    linear-gradient(180deg, #f4f7fb, var(--paper));
+  background: #f4f5f6;
   font-family: var(--font);
 }
 
@@ -1448,4 +1446,82 @@ th {
     transform: none;
     animation: none;
   }
+}
+
+/* MVP2 resource forms and document lists. */
+.sync-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-height: 42px;
+  margin-bottom: 18px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.connection-state {
+  max-width: 600px;
+  padding: 24px 0;
+}
+.connection-state p { overflow-wrap: anywhere; }
+.view > .stack > h2 { margin: 0; font-size: 1.4rem; }
+.button, .icon-btn, .product-card, .product-row, .ticket-list,
+.field input, select, .sale-tab, .nav nav a, .toast {
+  border-radius: 6px;
+}
+.button { white-space: normal; text-align: center; }
+button:disabled { cursor: wait; opacity: 0.6; }
+.product-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.product-title h3 { min-width: 0; overflow-wrap: anywhere; }
+.product-title .icon-btn { flex: 0 0 32px; width: 32px; height: 32px; }
+.product-card__meta { display: block; overflow-wrap: anywhere; }
+.ticket-line .icon-btn { width: 32px; height: 32px; }
+.ticket-line strong { overflow-wrap: anywhere; }
+.ticket-sub { font-size: 0.8rem; }
+.ticket .field { margin-bottom: 16px; }
+.ticket .pay-form { margin-top: 20px; }
+.history-filters { display: grid; grid-template-columns: minmax(0, 1fr) 180px 180px; gap: 12px; }
+.record-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.65fr) minmax(0, 1.5fr) minmax(100px, 0.6fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.record-row p, .entity-row p { margin: 4px 0; color: var(--muted); font-size: 0.85rem; }
+.record-row > *, .entity-row > * { min-width: 0; overflow-wrap: anywhere; }
+.entity-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.entity-row span { color: var(--muted); font-size: 0.85rem; }
+.entity-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 4px; background: #e6ebe8; max-width: 540px; }
+.entity-tabs .is-active { box-shadow: none; background: #fff; color: #225940; }
+.purchase-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; margin: 20px 0; }
+.purchase-line { display: grid; grid-template-columns: minmax(0, 1fr) 100px 130px 40px; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.purchase-line > strong { overflow-wrap: anywhere; }
+.detail-total { padding-top: 16px; font-weight: 700; text-align: right; }
+#ticket-count { display: inline-block; min-width: 1.5em; font-size: 0.85rem; color: var(--muted); }
+.field { min-width: 0; }
+.field input, select { max-width: 100%; min-width: 0; }
+.status-chip, th, .panel-head p, .ticket-head p, .invoice__head p { letter-spacing: 0; }
+:focus-visible { outline: 2px solid #32745c; outline-offset: 2px; }
+@media (max-width: 980px) {
+  .nav nav { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .nav nav a { white-space: normal; }
+  .history-filters { grid-template-columns: 1fr 1fr; }
+  .history-filters .search { grid-column: 1 / -1; }
+  .sale-tabs { position: static; }
+  .sale-layout[data-pane="catalog"] { padding-bottom: 0; }
+  .record-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
+  .record-row .row-actions { justify-content: flex-end; }
+  .record-row > div:nth-child(2) { grid-column: 1; grid-row: 2; }
+}
+@media (max-width: 640px) {
+  .nav nav a { font-size: 0.72rem; }
+  .sync-bar { justify-content: flex-start; flex-wrap: wrap; }
+  .purchase-line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
+  .purchase-line > strong { grid-column: 1 / -1; }
+  .purchase-line .icon-btn { width: 32px; height: 32px; }
+  .product-card__meta { display: none; }
+  .modal-backdrop { padding: 10px; }
+  .modal { padding: 16px; }
 }

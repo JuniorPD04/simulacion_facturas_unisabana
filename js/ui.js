@@ -37,6 +37,7 @@
   function bindDismiss(onCancel) {
     var root = modalRoot();
     function cancel() {
+      if (PYL.app && PYL.app.isBusy()) return;
       if (onCancel) onCancel();
       else closeModal();
     }

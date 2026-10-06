@@ -1,534 +1,191 @@
 (function (global) {
   var PYL = global.PYL || (global.PYL = {});
-  var STORAGE_KEY = "papel-y-luna-pos-mvp1";
-
-  var state = {
-    products: [],
-    sales: [],
-    currentSale: null,
-    meta: {
-      productSeq: 1,
-      saleSeq: 1,
-      draftSeq: 1
-    }
-  };
-
-  function seedProducts() {
-    return [
-      { id: "p1", codigoInterno: "PL-001", nombre: "Cuaderno argollado carta", categoria: "Cuadernos", precio: 18500, costo: 11000, seguimientoInventario: true, stock: 24, imagen: "assets/cuadernos.svg" },
-      { id: "p2", codigoInterno: "PL-002", nombre: "Lapicero negro gel", categoria: "Escritura", precio: 2800, costo: 1200, seguimientoInventario: true, stock: 80, imagen: "assets/escritura.svg" },
-      { id: "p3", codigoInterno: "PL-003", nombre: "Resma papel carta", categoria: "Impresion", precio: 23500, costo: 16800, seguimientoInventario: true, stock: 18, imagen: "assets/impresion.svg" },
-      { id: "p4", codigoInterno: "PL-004", nombre: "Caja de colores x24", categoria: "Arte", precio: 16900, costo: 9800, seguimientoInventario: true, stock: 15, imagen: "assets/arte.svg" },
-      { id: "p5", codigoInterno: "PL-005", nombre: "Marcadores borrables x4", categoria: "Oficina", precio: 14200, costo: 8100, seguimientoInventario: true, stock: 22, imagen: "assets/oficina.svg" },
-      { id: "p6", codigoInterno: "PL-006", nombre: "Carpeta plastica oficio", categoria: "Oficina", precio: 3200, costo: 1500, seguimientoInventario: true, stock: 40, imagen: "assets/oficina.svg" },
-      { id: "p7", codigoInterno: "PL-007", nombre: "Cartulina escolar amarilla", categoria: "Arte", precio: 1800, costo: 700, seguimientoInventario: true, stock: 60, imagen: "assets/arte.svg" },
-      { id: "p8", codigoInterno: "PL-008", nombre: "Cinta transparente grande", categoria: "Oficina", precio: 5600, costo: 2700, seguimientoInventario: true, stock: 28, imagen: "assets/oficina.svg" },
-      { id: "p9", codigoInterno: "PL-009", nombre: "Memoria USB 32 GB", categoria: "Tecnología", precio: 28900, costo: 19500, seguimientoInventario: true, stock: 10, imagen: "assets/tecnologia.svg" },
-      { id: "p10", codigoInterno: "PL-010", nombre: "Block iris surtido", categoria: "Arte", precio: 9500, costo: 5200, seguimientoInventario: true, stock: 16, imagen: "assets/arte.svg" },
-      { id: "p11", codigoInterno: "PL-011", nombre: "Corrector liquido", categoria: "Escritura", precio: 4100, costo: 1900, seguimientoInventario: true, stock: 35, imagen: "assets/escritura.svg" },
-      { id: "p12", codigoInterno: "PL-012", nombre: "Impresion blanco y negro", categoria: "Impresion", precio: 500, costo: 80, seguimientoInventario: false, stock: 0, imagen: "assets/impresion.svg" }
-    ];
-  }
-
+  var state = {};
+  PYL.api.resources.forEach(function (r) { state[r] = []; });
+  var currentSale;
+  var busy = false;
+  var inventoryFresh = true;
+  var payments = ["Efectivo", "Nequi", "Debe"];
+  var clone = function (value) { return JSON.parse(JSON.stringify(value)); };
+  var total = function (items, key) { return items.reduce(function (sum, i) { return sum + i[key] * i.cantidad; }, 0); };
   function emptySale() {
+    return { id: crypto.randomUUID(), fecha: new Date().toISOString(), estado: "abierta", clienteId: "", metodoPago: "Efectivo", valorRecibido: "", items: [], paso: "items" };
+  }
+  function normalize(resource, row) {
+    var result = Object.assign({}, row, { id: String(row.id) });
+    if (resource === "productos") {
+      result.precio = Number(row.precio); result.costo = Number(row.costo); result.stock = Number(row.stock);
+      result.seguimientoInventario = row.seguimientoInventario === true || String(row.seguimientoInventario).toLowerCase() === "true";
+    }
+    if (resource === "ventas" || resource === "compras") {
+      try { result.items = JSON.parse(row.itemsJson || "[]"); }
+      catch (e) { throw new Error("itemsJson invalido en " + resource + ": " + row.id); }
+      if (!Array.isArray(result.items)) throw new Error("Detalle invalido en " + row.id);
+      result.total = Number(row.total);
+    }
+    return result;
+  }
+  function put(resource, row) {
+    var value = normalize(resource, row);
+    var index = state[resource].findIndex(function (r) { return r.id === value.id; });
+    if (index < 0) state[resource].unshift(value); else state[resource][index] = value;
+    return value;
+  }
+  function get(resource, id) { return state[resource].find(function (r) { return r.id === id; }); }
+  async function exclusive(fn) {
+    if (busy) throw new Error("Hay una operacion en curso.");
+    busy = true;
+    try { return await fn(); } finally { busy = false; }
+  }
+  async function load() {
+    // Commit the snapshot only after every resource has loaded successfully.
+    var rows = await Promise.all(PYL.api.resources.map(async function (r) {
+      return [r, (await PYL.api.apiGet(r)).map(function (row) { return normalize(r, row); })];
+    }));
+    rows.forEach(function (pair) { state[pair[0]] = pair[1]; });
+    inventoryFresh = true;
+  }
+  function productData(data, id) {
+    var value = {
+      id: id || crypto.randomUUID(), codigo: String(data.codigo || "").trim(), nombre: String(data.nombre || "").trim(),
+      categoriaId: data.categoriaId, precio: Number(data.precio), costo: Number(data.costo),
+      seguimientoInventario: Boolean(data.seguimientoInventario), stock: Number(data.stock)
+    };
+    if (!value.nombre || !value.codigo) throw new Error("Nombre y codigo son obligatorios.");
+    if (!get("categorias", value.categoriaId)) throw new Error("Selecciona una categoria existente.");
+    if (data.precio === "" || data.costo === "" || !Number.isFinite(value.precio) || value.precio < 0 || !Number.isFinite(value.costo) || value.costo < 0) throw new Error("Precio y costo deben ser numeros no negativos.");
+    if (!value.seguimientoInventario) value.stock = 0;
+    if (value.seguimientoInventario && (data.stock === "" || !Number.isInteger(value.stock) || value.stock < 0)) throw new Error("Stock debe ser un entero no negativo.");
+    if (state.productos.some(function (p) { return p.id !== id && p.codigo.toLowerCase() === value.codigo.toLowerCase(); })) throw new Error("Ya existe un producto con ese codigo.");
+    return value;
+  }
+  function snapshot(p, qty) { return { productoId: p.id, codigo: p.codigo, nombre: p.nombre, precio: p.precio, costo: p.costo, cantidad: qty }; }
+  function saleRecord(status) {
+    if (!currentSale.items.length) throw new Error("Agrega al menos un producto.");
+    var amount = total(currentSale.items, "precio");
+    var received = currentSale.metodoPago === "Efectivo" ? Number(currentSale.valorRecibido) : currentSale.metodoPago === "Nequi" ? amount : 0;
+    if (!payments.includes(currentSale.metodoPago)) throw new Error("Selecciona un metodo de pago.");
+    if (currentSale.clienteId && !get("clientes", currentSale.clienteId)) throw new Error("El cliente ya no existe.");
+    if (status === "cerrada") {
+      if (!inventoryFresh) throw new Error("Actualiza los datos antes de cerrar otra venta.");
+      if (currentSale.metodoPago === "Debe" && !currentSale.clienteId) throw new Error("Selecciona un cliente para el pago Debe.");
+      if (currentSale.metodoPago === "Efectivo" && (currentSale.valorRecibido === "" || !Number.isFinite(received) || received < amount)) throw new Error("El valor recibido debe cubrir el total.");
+      currentSale.items.forEach(function (i) {
+        var p = get("productos", i.productoId);
+        if (!p) throw new Error("El producto " + i.nombre + " ya no existe.");
+        if (p.seguimientoInventario && p.stock < i.cantidad) throw new Error("Stock insuficiente para " + p.nombre + ". Disponible: " + p.stock);
+      });
+    }
     return {
-      id: PYL.utils.uid("sale"),
-      draftId: null,
-      draftNumero: "",
-      items: [],
-      cliente: "Consumidor final",
-      metodoPago: "efectivo",
-      valorRecibido: "",
-      paso: "items"
+      id: currentSale.id, fecha: currentSale.fecha, estado: status, clienteId: currentSale.clienteId,
+      metodoPago: currentSale.metodoPago, subtotal: amount, total: amount,
+      valorRecibido: Number.isFinite(received) ? received : 0, cambio: status === "cerrada" && currentSale.metodoPago === "Efectivo" ? received - amount : 0,
+      itemsJson: JSON.stringify(currentSale.items), actualizadoEn: new Date().toISOString()
     };
   }
-
-  function persist() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        products: state.products,
-        sales: state.sales,
-        currentSale: state.currentSale,
-        meta: state.meta
-      }));
-    } catch (error) {
-      PYL.ui.toast("No se pudo guardar en este navegador. Revisa el almacenamiento local.", "error");
-    }
-  }
-
-  function clone(value) {
-    return JSON.parse(JSON.stringify(value));
-  }
-
-  function lineSubtotal(item) {
-    return item.precio * item.cantidad;
-  }
-
-  function saleTotal(items) {
-    return items.reduce(function (sum, item) {
-      return sum + lineSubtotal(item);
-    }, 0);
-  }
-
-  function getProduct(id) {
-    return state.products.find(function (product) {
-      return product.id === id;
-    }) || null;
-  }
-
-  function reservedQty(productId) {
-    if (!state.currentSale) return 0;
-    var line = state.currentSale.items.find(function (item) {
-      return item.productId === productId;
+  async function saveSale(status) {
+    return exclusive(async function () {
+      var record = saleRecord(status);
+      var saved = put("ventas", await PYL.api.apiPost("ventas", get("ventas", record.id) ? "update" : "create", record));
+      var warning = "";
+      if (status === "cerrada") {
+        try { state.productos = (await PYL.api.apiGet("productos")).map(function (p) { return normalize("productos", p); }); }
+        catch (error) { inventoryFresh = false; warning = "Venta registrada. No se pudo recargar el inventario; actualiza los datos antes de la siguiente operacion."; }
+      }
+      currentSale = emptySale();
+      return { record: clone(saved), warning: warning };
     });
-    return line ? line.cantidad : 0;
   }
-
-  function availableStock(product) {
-    if (!product.seguimientoInventario) return Infinity;
-    return Math.max(0, Number(product.stock) - reservedQty(product.id));
-  }
-
-  function warehouseStock(product) {
-    if (!product.seguimientoInventario) return Infinity;
-    return Math.max(0, Number(product.stock) || 0);
-  }
-
-  function reconcileDraftItems(items) {
-    var adjustments = [];
-    var next = [];
-
-    (items || []).forEach(function (item) {
-      var product = getProduct(item.productId);
-      if (!product) {
-        adjustments.push(item.nombre + " se quitó porque ya no está en el catálogo.");
-        return;
-      }
-
-      var qty = item.cantidad;
-      if (product.seguimientoInventario) {
-        var available = warehouseStock(product);
-        if (available <= 0) {
-          adjustments.push(product.nombre + " se quitó: no hay stock.");
-          return;
-        }
-        if (qty > available) {
-          adjustments.push(product.nombre + ": de " + qty + " a " + available + " und. (stock insuficiente).");
-          qty = available;
-        }
-      }
-
-      next.push({
-        productId: product.id,
-        codigoInterno: product.codigoInterno,
-        nombre: product.nombre,
-        precio: product.precio,
-        cantidad: qty
+  PYL.store = {
+    payments: payments,
+    init: async function () { if (!currentSale) currentSale = emptySale(); await load(); },
+    reload: function () { return exclusive(load); },
+    isBusy: function () { return busy; },
+    list: function (r) { return clone(state[r]); },
+    get: function (r, id) { var row = get(r, id); return row ? clone(row) : null; },
+    label: function (r, id, fallback) { var row = get(r, id); return row ? row.nombre : fallback || "Sin asociar"; },
+    getProducts: function () { return this.list("productos"); },
+    getProduct: function (id) { return this.get("productos", id); },
+    getCategories: function () { return this.list("categorias"); },
+    getSales: function () { return this.list("ventas").sort(function (a, b) { return String(b.actualizadoEn || b.fecha).localeCompare(String(a.actualizadoEn || a.fecha)); }); },
+    getSale: function (id) { return this.get("ventas", id); },
+    getCurrentSale: function () { return currentSale; },
+    newSale: function () { currentSale = emptySale(); },
+    clearSale: function () { currentSale.items = []; currentSale.paso = "items"; currentSale.valorRecibido = ""; },
+    setSaleField: function (field, value) { if (["clienteId", "metodoPago", "valorRecibido", "paso"].includes(field)) currentSale[field] = value; },
+    currentTotal: function () { return total(currentSale.items, "precio"); },
+    lineSubtotal: function (i) { return i.precio * i.cantidad; },
+    suggestCode: function () { var max = state.productos.reduce(function (n, p) { var m = p.codigo.match(/(\d+)$/); return Math.max(n, m ? Number(m[1]) : 0); }, 0); return "PL-" + PYL.utils.pad(max + 1, 3); },
+    addItem: function (id, quantity) {
+      var p = get("productos", id), qty = Number(quantity);
+      if (!p) throw new Error("El producto no existe.");
+      if (!Number.isInteger(qty) || qty < 1) throw new Error("La cantidad debe ser un entero mayor que cero.");
+      var line = currentSale.items.find(function (i) { return i.productoId === id; });
+      if (line) line.cantidad += qty; else currentSale.items.push(snapshot(p, qty));
+    },
+    updateItemQty: function (id, quantity) {
+      var qty = Number(quantity);
+      if (!Number.isInteger(qty) || qty < 1) throw new Error("La cantidad debe ser un entero mayor que cero.");
+      var line = currentSale.items.find(function (i) { return i.productoId === id; });
+      if (line) line.cantidad = qty;
+    },
+    removeItem: function (id) { currentSale.items = currentSale.items.filter(function (i) { return i.productoId !== id; }); },
+    saveDraft: function () { return saveSale("abierta"); },
+    closeSale: function () { return saveSale("cerrada"); },
+    resumeDraft: async function (id) {
+      if (currentSale.items.length && currentSale.id !== id) await saveSale("abierta");
+      var row = get("ventas", id);
+      if (!row || row.estado !== "abierta") throw new Error("La venta abierta ya no existe.");
+      currentSale = Object.assign({}, clone(row), { paso: "items" });
+      currentSale.items = row.items.map(function (i) { var p = get("productos", i.productoId); return p ? snapshot(p, i.cantidad) : clone(i); });
+    },
+    saveProduct: function (data, id, quick) {
+      return exclusive(async function () {
+        var old = get("productos", id);
+        if (quick && !old) throw new Error("El producto ya no existe.");
+        var value = productData(quick ? Object.assign({}, old, data, { stock: old.stock, seguimientoInventario: old.seguimientoInventario, codigo: old.codigo }) : data, id);
+        if (quick) value = { id: id, nombre: value.nombre, categoriaId: value.categoriaId, precio: value.precio, costo: value.costo };
+        var p = put("productos", await PYL.api.apiPost("productos", id ? "update" : "create", value));
+        currentSale.items = currentSale.items.map(function (i) { return i.productoId === p.id ? snapshot(p, i.cantidad) : i; });
+        return clone(p);
       });
-    });
-
-    return { items: next, adjustments: adjustments };
-  }
-
-  var Store = {
-    init: function () {
-      try {
-        var raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          var saved = JSON.parse(raw);
-          state.products = Array.isArray(saved.products) ? saved.products : seedProducts();
-          state.sales = Array.isArray(saved.sales) ? saved.sales : [];
-          state.currentSale = saved.currentSale || emptySale();
-          state.meta = saved.meta || state.meta;
-        } else {
-          state.products = seedProducts();
-          state.sales = [];
-          state.currentSale = emptySale();
-          state.meta = { productSeq: 13, saleSeq: 1, draftSeq: 1 };
-          persist();
-        }
-      } catch (error) {
-        state.products = seedProducts();
-        state.sales = [];
-        state.currentSale = emptySale();
-        state.meta = { productSeq: 13, saleSeq: 1, draftSeq: 1 };
-      }
-
-      if (!state.currentSale) state.currentSale = emptySale();
-      if (!state.meta.draftSeq) state.meta.draftSeq = 1;
-      if (!state.currentSale.draftId) state.currentSale.draftId = null;
-      if (!state.currentSale.draftNumero) state.currentSale.draftNumero = "";
     },
-
-    getProducts: function () {
-      return state.products.slice();
-    },
-
-    getProduct: getProduct,
-
-    getCategories: function () {
-      var set = {};
-      state.products.forEach(function (product) {
-        if (product.categoria) set[product.categoria] = true;
+    saveEntity: function (r, data, id) {
+      return exclusive(async function () {
+        if (!["categorias", "clientes", "proveedores"].includes(r)) throw new Error("Entidad invalida.");
+        var value = { id: id || crypto.randomUUID(), nombre: String(data.nombre || "").trim() };
+        if (!value.nombre) throw new Error("El nombre es obligatorio.");
+        if (r !== "categorias") { value.telefono = String(data.telefono || "").trim(); value.correo = String(data.correo || "").trim(); }
+        return put(r, await PYL.api.apiPost(r, id ? "update" : "create", value));
       });
-      return Object.keys(set).sort();
     },
-
-    suggestCode: function () {
-      var max = 0;
-      state.products.forEach(function (product) {
-        var match = String(product.codigoInterno || "").match(/(\d+)$/);
-        if (match) max = Math.max(max, parseInt(match[1], 10));
+    deleteRecord: function (r, id) {
+      return exclusive(async function () {
+        if (r === "productos" && currentSale.items.some(function (i) { return i.productoId === id; })) throw new Error("El producto esta en la venta en curso. Quitalo del ticket primero.");
+        if (r === "clientes" && currentSale.clienteId === id) throw new Error("El cliente esta asociado a la venta en curso.");
+        await PYL.api.apiPost(r, "delete", { id: id });
+        state[r] = state[r].filter(function (row) { return row.id !== id; });
+        if (r === "ventas" && currentSale.id === id) currentSale = emptySale();
       });
-      return "PL-" + PYL.utils.pad(max + 1, 3);
     },
-
-    validateProduct: function (data, editingId) {
-      var errors = {};
-      var nombre = String(data.nombre || "").trim();
-      var categoria = String(data.categoria || "").trim();
-      var codigoInterno = String(data.codigoInterno || "").trim();
-      var precio = PYL.utils.toNonNegativeNumber(data.precio);
-      var costo = PYL.utils.toNonNegativeNumber(data.costo);
-      var seguimiento = Boolean(data.seguimientoInventario);
-      var stock = seguimiento ? PYL.utils.toNonNegativeInteger(data.stock) : 0;
-
-      if (!nombre) errors.nombre = "El nombre es obligatorio.";
-      if (!categoria) errors.categoria = "La categoría es obligatoria.";
-      if (!codigoInterno) errors.codigoInterno = "El código interno es obligatorio.";
-      if (!Number.isFinite(precio) || precio < 0) errors.precio = "El precio debe ser un número no negativo.";
-      if (!Number.isFinite(costo) || costo < 0) errors.costo = "El costo debe ser un número no negativo.";
-      if (seguimiento && !Number.isFinite(stock)) errors.stock = "El stock debe ser un entero no negativo.";
-
-      var duplicated = state.products.some(function (product) {
-        return product.codigoInterno.toLowerCase() === codigoInterno.toLowerCase() && product.id !== editingId;
-      });
-      if (duplicated) errors.codigoInterno = "Ya existe un producto con ese código interno.";
-
-      return {
-        ok: Object.keys(errors).length === 0,
-        errors: errors,
-        value: {
-          nombre: nombre,
-          categoria: categoria,
-          codigoInterno: codigoInterno,
-          precio: precio,
-          costo: costo,
-          seguimientoInventario: seguimiento,
-          stock: seguimiento ? stock : 0,
-          imagen: data.imagen || PYL.utils.categoryImage(categoria)
-        }
-      };
-    },
-
-    createProduct: function (data) {
-      var result = this.validateProduct(data, null);
-      if (!result.ok) return result;
-      var product = result.value;
-      product.id = PYL.utils.uid("p");
-      state.products.unshift(product);
-      persist();
-      return { ok: true, product: clone(product) };
-    },
-
-    updateProduct: function (id, data) {
-      var index = state.products.findIndex(function (product) {
-        return product.id === id;
-      });
-      if (index === -1) return { ok: false, errors: { general: "El producto no existe." } };
-      var result = this.validateProduct(data, id);
-      if (!result.ok) return result;
-      state.products[index] = Object.assign({}, state.products[index], result.value, { id: id });
-      persist();
-      return { ok: true, product: clone(state.products[index]) };
-    },
-
-    deleteProduct: function (id) {
-      var index = state.products.findIndex(function (product) {
-        return product.id === id;
-      });
-      if (index === -1) return { ok: false, message: "El producto ya no existe." };
-      state.products.splice(index, 1);
-      if (state.currentSale) {
-        state.currentSale.items = state.currentSale.items.filter(function (item) {
-          return item.productId !== id;
+    createPurchase: function (purchase) {
+      return exclusive(async function () {
+        if (!inventoryFresh) throw new Error("Actualiza los datos antes de registrar otra compra.");
+        if (!get("proveedores", purchase.proveedorId)) throw new Error("Selecciona un proveedor existente.");
+        if (!purchase.items.length) throw new Error("Agrega al menos un producto.");
+        purchase.items.forEach(function (i) {
+          if (!get("productos", i.productoId)) throw new Error("El producto " + i.nombre + " ya no existe.");
+          if (!Number.isInteger(i.cantidad) || i.cantidad < 1 || !Number.isFinite(i.costo) || i.costo < 0) throw new Error("Revisa cantidades y costos de la compra.");
         });
-      }
-      persist();
-      return { ok: true };
-    },
-
-    getCurrentSale: function () {
-      return state.currentSale;
-    },
-
-    lineSubtotal: lineSubtotal,
-
-    currentTotal: function () {
-      return saleTotal(state.currentSale.items);
-    },
-
-    availableStock: availableStock,
-
-    addItem: function (productId, quantity) {
-      var product = getProduct(productId);
-      if (!product) return { ok: false, message: "El producto no existe." };
-      var qty = PYL.utils.toNonNegativeInteger(quantity);
-      if (!Number.isFinite(qty) || qty < 1) return { ok: false, message: "La cantidad debe ser un entero mayor que 0." };
-
-      var available = availableStock(product);
-      if (product.seguimientoInventario && qty > available) {
-        return { ok: false, message: available === 0 ? "No hay stock disponible." : "Solo hay " + available + " unidad(es) disponibles." };
-      }
-
-      var line = state.currentSale.items.find(function (item) {
-        return item.productId === productId;
+        var saved = put("compras", await PYL.api.apiPost("compras", "create", {
+          id: purchase.id, fecha: purchase.fecha, proveedorId: purchase.proveedorId,
+          total: total(purchase.items, "costo"), itemsJson: JSON.stringify(purchase.items)
+        }));
+        var warning = "";
+        try { state.productos = (await PYL.api.apiGet("productos")).map(function (p) { return normalize("productos", p); }); }
+        catch (error) { inventoryFresh = false; warning = "Compra registrada. Actualiza los datos para consultar el inventario."; }
+        return { record: clone(saved), warning: warning };
       });
-      if (line) {
-        line.cantidad += qty;
-      } else {
-        state.currentSale.items.push({
-          productId: product.id,
-          codigoInterno: product.codigoInterno,
-          nombre: product.nombre,
-          precio: product.precio,
-          cantidad: qty
-        });
-      }
-      persist();
-      return { ok: true };
-    },
-
-    updateItemQty: function (productId, quantity) {
-      var line = state.currentSale.items.find(function (item) {
-        return item.productId === productId;
-      });
-      if (!line) return { ok: false, message: "El producto no está en la venta." };
-      var qty = PYL.utils.toNonNegativeInteger(quantity);
-      if (!Number.isFinite(qty) || qty < 1) return { ok: false, message: "La cantidad debe ser un entero mayor que 0." };
-
-      var product = getProduct(productId);
-      if (product && product.seguimientoInventario) {
-        var already = line.cantidad;
-        var available = availableStock(product) + already;
-        if (qty > available) {
-          line.cantidad = available;
-          persist();
-          return { ok: false, message: "El stock máximo es " + available + ".", clamped: true, cantidad: available };
-        }
-      }
-
-      line.cantidad = qty;
-      persist();
-      return { ok: true };
-    },
-
-    removeItem: function (productId) {
-      state.currentSale.items = state.currentSale.items.filter(function (item) {
-        return item.productId !== productId;
-      });
-      persist();
-    },
-
-    clearSale: function () {
-      state.currentSale.items = [];
-      state.currentSale.paso = "items";
-      state.currentSale.valorRecibido = "";
-      state.currentSale.draftId = null;
-      state.currentSale.draftNumero = "";
-      persist();
-    },
-
-    newSale: function () {
-      state.currentSale = emptySale();
-      persist();
-    },
-
-    setSaleField: function (field, value) {
-      state.currentSale[field] = value;
-      persist();
-    },
-
-    previewDraftResume: function (id) {
-      var draft = this.getSale(id);
-      if (!draft || draft.estado !== "borrador") {
-        return { ok: false, message: "Ese borrador ya no existe." };
-      }
-      var reconciled = reconcileDraftItems(draft.items);
-      return {
-        ok: true,
-        draft: clone(draft),
-        items: reconciled.items,
-        adjustments: reconciled.adjustments,
-        empty: !reconciled.items.length
-      };
-    },
-
-    saveDraft: function () {
-      var sale = state.currentSale;
-      if (!sale || !sale.items.length) {
-        return { ok: false, message: "Agrega al menos un producto para guardar el borrador." };
-      }
-
-      var draftId = sale.draftId || sale.id;
-      var draftNumero = sale.draftNumero;
-      if (!draftNumero) {
-        draftNumero = "B-" + PYL.utils.pad(state.meta.draftSeq, 4);
-        state.meta.draftSeq += 1;
-      }
-
-      var draft = {
-        id: draftId,
-        numero: draftNumero,
-        fecha: new Date().toISOString(),
-        cliente: String(sale.cliente || "").trim() || "Consumidor final",
-        items: clone(sale.items),
-        total: saleTotal(sale.items),
-        metodoPago: sale.metodoPago,
-        valorRecibido: sale.valorRecibido,
-        cambio: 0,
-        estado: "borrador"
-      };
-
-      var existing = state.sales.findIndex(function (entry) {
-        return entry.id === draftId;
-      });
-      if (existing !== -1) state.sales.splice(existing, 1);
-      state.sales.unshift(draft);
-      state.currentSale = emptySale();
-      persist();
-      return { ok: true, sale: clone(draft) };
-    },
-
-    resumeDraft: function (id) {
-      var index = state.sales.findIndex(function (sale) {
-        return sale.id === id && sale.estado === "borrador";
-      });
-      if (index === -1) return { ok: false, message: "Ese borrador ya no existe." };
-
-      if (state.currentSale.items.length) {
-        var parked = this.saveDraft();
-        if (!parked.ok) return parked;
-        index = state.sales.findIndex(function (sale) {
-          return sale.id === id && sale.estado === "borrador";
-        });
-        if (index === -1) return { ok: false, message: "Ese borrador ya no existe." };
-      }
-
-      var draft = state.sales[index];
-      var reconciled = reconcileDraftItems(draft.items);
-      if (!reconciled.items.length) {
-        return {
-          ok: false,
-          empty: true,
-          adjustments: reconciled.adjustments,
-          message: "Ningún producto de este borrador tiene stock suficiente para continuar."
-        };
-      }
-
-      state.sales.splice(index, 1);
-      state.currentSale = {
-        id: PYL.utils.uid("sale"),
-        draftId: draft.id,
-        draftNumero: draft.numero,
-        items: reconciled.items,
-        cliente: draft.cliente || "Consumidor final",
-        metodoPago: draft.metodoPago || "efectivo",
-        valorRecibido: draft.valorRecibido || "",
-        paso: "items"
-      };
-      persist();
-      return { ok: true, adjustments: reconciled.adjustments, sale: clone(state.currentSale) };
-    },
-
-    discardDraft: function (id) {
-      var index = state.sales.findIndex(function (sale) {
-        return sale.id === id && sale.estado === "borrador";
-      });
-      if (index === -1) return { ok: false, message: "Ese borrador ya no existe." };
-      state.sales.splice(index, 1);
-      persist();
-      return { ok: true };
-    },
-
-    closeSale: function () {
-      var sale = state.currentSale;
-      if (!sale.items.length) return { ok: false, message: "No se puede cerrar una venta sin productos." };
-
-      var total = saleTotal(sale.items);
-      var metodo = sale.metodoPago;
-      if (metodo !== "efectivo" && metodo !== "nequi" && metodo !== "debe") {
-        return { ok: false, message: "Selecciona un método de pago." };
-      }
-
-      var cliente = String(sale.cliente || "").trim() || "Consumidor final";
-      var valorRecibido = null;
-      var cambio = 0;
-
-      if (metodo === "efectivo") {
-        valorRecibido = PYL.utils.toNonNegativeNumber(sale.valorRecibido);
-        if (!Number.isFinite(valorRecibido)) return { ok: false, message: "Ingresa el valor recibido." };
-        if (valorRecibido < total) return { ok: false, message: "El valor recibido no cubre el total." };
-        cambio = valorRecibido - total;
-      }
-
-      if (metodo === "debe") {
-        if (!String(sale.cliente || "").trim() || cliente === "Consumidor final") {
-          return { ok: false, message: "Para pago en Debe debes indicar el nombre del cliente." };
-        }
-      }
-
-      for (var i = 0; i < sale.items.length; i += 1) {
-        var item = sale.items[i];
-        var product = getProduct(item.productId);
-        if (product && product.seguimientoInventario) {
-          if (product.stock < item.cantidad) {
-            return { ok: false, message: "Stock insuficiente para " + product.nombre + "." };
-          }
-        }
-      }
-
-      sale.items.forEach(function (item) {
-        var product = getProduct(item.productId);
-        if (product && product.seguimientoInventario) {
-          product.stock -= item.cantidad;
-        }
-      });
-
-      var closed = {
-        id: sale.id,
-        numero: "V-" + PYL.utils.pad(state.meta.saleSeq, 4),
-        fecha: new Date().toISOString(),
-        cliente: cliente,
-        items: clone(sale.items),
-        total: total,
-        metodoPago: metodo,
-        valorRecibido: valorRecibido,
-        cambio: cambio,
-        estado: "cerrada"
-      };
-
-      state.meta.saleSeq += 1;
-      state.sales.unshift(closed);
-      state.currentSale = emptySale();
-      persist();
-      return { ok: true, sale: clone(closed) };
-    },
-
-    getSales: function () {
-      return state.sales.slice().sort(function (a, b) {
-        if (a.estado === "borrador" && b.estado !== "borrador") return -1;
-        if (b.estado === "borrador" && a.estado !== "borrador") return 1;
-        return new Date(b.fecha) - new Date(a.fecha);
-      });
-    },
-
-    getSale: function (id) {
-      return state.sales.find(function (sale) {
-        return sale.id === id;
-      }) || null;
     }
   };
-
-  PYL.store = Store;
 })(window);
