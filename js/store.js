@@ -60,6 +60,14 @@
     return value;
   }
   function snapshot(p, qty) { return { productoId: p.id, codigo: p.codigo, nombre: p.nombre, precio: p.precio, costo: p.costo, cantidad: qty }; }
+  function validateStock(product, quantity) {
+    if (product.seguimientoInventario && quantity > product.stock) throw new Error("Stock insuficiente para " + product.nombre + ". Disponible: " + product.stock);
+  }
+  function availableStock(product) {
+    if (!product.seguimientoInventario) return Infinity;
+    var line = currentSale.items.find(function (i) { return i.productoId === product.id; });
+    return Math.max(0, product.stock - (line ? line.cantidad : 0));
+  }
   function saleRecord(status) {
     if (!currentSale.items.length) throw new Error("Agrega al menos un producto.");
     var amount = total(currentSale.items, "precio");
@@ -73,7 +81,7 @@
       currentSale.items.forEach(function (i) {
         var p = get("productos", i.productoId);
         if (!p) throw new Error("El producto " + i.nombre + " ya no existe.");
-        if (p.seguimientoInventario && p.stock < i.cantidad) throw new Error("Stock insuficiente para " + p.nombre + ". Disponible: " + p.stock);
+        validateStock(p, i.cantidad);
       });
     }
     return {
@@ -115,19 +123,25 @@
     setSaleField: function (field, value) { if (["clienteId", "metodoPago", "valorRecibido", "paso"].includes(field)) currentSale[field] = value; },
     currentTotal: function () { return total(currentSale.items, "precio"); },
     lineSubtotal: function (i) { return i.precio * i.cantidad; },
+    availableStock: availableStock,
     suggestCode: function () { var max = state.productos.reduce(function (n, p) { var m = p.codigo.match(/(\d+)$/); return Math.max(n, m ? Number(m[1]) : 0); }, 0); return "PL-" + PYL.utils.pad(max + 1, 3); },
     addItem: function (id, quantity) {
       var p = get("productos", id), qty = Number(quantity);
       if (!p) throw new Error("El producto no existe.");
       if (!Number.isInteger(qty) || qty < 1) throw new Error("La cantidad debe ser un entero mayor que cero.");
       var line = currentSale.items.find(function (i) { return i.productoId === id; });
+      validateStock(p, qty + (line ? line.cantidad : 0));
       if (line) line.cantidad += qty; else currentSale.items.push(snapshot(p, qty));
     },
     updateItemQty: function (id, quantity) {
       var qty = Number(quantity);
       if (!Number.isInteger(qty) || qty < 1) throw new Error("La cantidad debe ser un entero mayor que cero.");
       var line = currentSale.items.find(function (i) { return i.productoId === id; });
-      if (line) line.cantidad = qty;
+      if (!line) throw new Error("El producto no esta en el ticket.");
+      var p = get("productos", id);
+      if (!p) throw new Error("El producto ya no existe.");
+      validateStock(p, qty);
+      line.cantidad = qty;
     },
     removeItem: function (id) { currentSale.items = currentSale.items.filter(function (i) { return i.productoId !== id; }); },
     saveDraft: function () { return saveSale("abierta"); },

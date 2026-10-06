@@ -91,7 +91,11 @@ el servicio.
 Ventas abiertas se guardan en Sheets y pueden retomarse desde Ventas. Retomar
 una venta conserva su registro y guarda primero otro ticket en curso, si tiene
 productos. Limpiar un ticket no elimina la version guardada; descartar una venta
-abierta en Ventas si elimina ese registro. El cierre requiere productos, stock
+abierta en Ventas si elimina ese registro. Al agregar o editar cantidades del
+ticket se comprueba el stock acumulado por producto y se rechaza el exceso,
+conservando la ultima cantidad valida. Agregar se deshabilita cuando todo el
+stock disponible ya esta en el ticket. Los productos sin seguimiento de
+inventario no tienen ese limite. El cierre requiere productos, stock
 suficiente, efectivo que cubra el total o cliente asociado para Debe.
 
 Al editar un producto desde el catalogo de venta cambian nombre, categoria,

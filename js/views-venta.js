@@ -6,6 +6,19 @@
     document.getElementById("catalog-grid").innerHTML = list.length ? list.map(function (p) {
       return '<article class="product-card"><img src="' + u.categoryImage(s.label("categorias", p.categoriaId)) + '" alt=""><div><div class="product-title"><h3>' + u.escapeHtml(p.nombre) + '</h3>' + c.icon("quick-edit", p.id, "Editar " + p.nombre, u.iconPencil()) + '</div><p class="product-card__meta">' + u.escapeHtml(p.codigo + " / " + s.label("categorias", p.categoriaId)) + '</p><strong>' + u.formatCurrency(p.precio) + '</strong><p class="product-card__stock">' + (p.seguimientoInventario ? "Stock: " + p.stock : "Sin control de inventario") + '</p><div class="qty-add"><input type="number" min="1" step="1" value="1" data-qty-for="' + u.escapeHtml(p.id) + '" aria-label="Cantidad de ' + u.escapeHtml(p.nombre) + '"><button class="button button--primary" data-action="add-item" data-id="' + u.escapeHtml(p.id) + '">Agregar</button></div></div></article>';
     }).join("") : '<p class="empty-note">No hay productos con ese criterio.</p>';
+    updateCatalogStock();
+  }
+  function updateCatalogStock() {
+    document.querySelectorAll("[data-qty-for]").forEach(function (input) {
+      var product = s.getProduct(input.dataset.qtyFor);
+      var available = s.availableStock(product);
+      if (product.seguimientoInventario) input.max = available;
+      else input.removeAttribute("max");
+      input.disabled = available === 0;
+      var button = input.closest(".product-card").querySelector('[data-action="add-item"]');
+      button.disabled = available === 0;
+      button.title = available === 0 ? "Stock disponible agotado" : "";
+    });
   }
   function payment(sale) {
     var received = Number(sale.valorRecibido), change = received - s.currentTotal();
@@ -19,12 +32,15 @@
     document.getElementById("ticket-root").innerHTML = '<div class="ticket-head"><h2>Ticket</h2><span class="pill">' + sale.items.length + ' items</span></div>' +
       '<label class="field">Cliente<select data-action="client" aria-label="Cliente">' + c.options("clientes", sale.clienteId, "Consumidor final") + '</select></label>' +
       (sale.paso === "pago" ? payment(sale) : '<div class="ticket-list">' + (sale.items.length ? sale.items.map(function (i) {
-        return '<div class="ticket-line"><div><strong>' + u.escapeHtml(i.nombre) + '</strong><span>' + u.formatCurrency(i.precio) + '</span></div><input class="ticket-qty" type="number" min="1" step="1" data-action="item-qty" data-id="' + u.escapeHtml(i.productoId) + '" value="' + i.cantidad + '" aria-label="Cantidad de ' + u.escapeHtml(i.nombre) + '"><strong class="ticket-sub">' + u.formatCurrency(i.precio * i.cantidad) + '</strong>' + c.icon("remove-item", i.productoId, "Quitar " + i.nombre, u.iconTrash(), true) + '</div>';
+        var product = s.getProduct(i.productoId);
+        var limit = product && product.seguimientoInventario ? ' max="' + product.stock + '"' : "";
+        return '<div class="ticket-line"><div><strong>' + u.escapeHtml(i.nombre) + '</strong><span>' + u.formatCurrency(i.precio) + '</span></div><input class="ticket-qty" type="number" min="1" step="1"' + limit + ' data-action="item-qty" data-id="' + u.escapeHtml(i.productoId) + '" value="' + i.cantidad + '" aria-label="Cantidad de ' + u.escapeHtml(i.nombre) + '"><strong class="ticket-sub">' + u.formatCurrency(i.precio * i.cantidad) + '</strong>' + c.icon("remove-item", i.productoId, "Quitar " + i.nombre, u.iconTrash(), true) + '</div>';
       }).join("") : '<p class="empty-note">Ticket vacio.</p>') + '</div><div class="ticket-actions"><button class="button button--ghost" data-action="clear-sale">Limpiar</button><button class="button button--ghost" data-action="save-sale"' + (!sale.items.length ? " disabled" : "") + '>Guardar abierta</button><button class="button button--primary" data-action="start-pay"' + (!sale.items.length ? " disabled" : "") + '>Cobrar</button></div>') +
       '<dl class="totals"><div><dt>Subtotal</dt><dd>' + u.formatCurrency(s.currentTotal()) + '</dd></div><div><dt>Total</dt><dd>' + u.formatCurrency(s.currentTotal()) + '</dd></div></dl>';
     document.getElementById("sale-layout").dataset.pane = sale.paso === "pago" ? "ticket" : pane;
     var count = document.getElementById("ticket-count");
     if (count) count.textContent = String(sale.items.length);
+    updateCatalogStock();
     document.querySelectorAll("[data-pane-tab]").forEach(function (el) { var active = el.dataset.paneTab === document.getElementById("sale-layout").dataset.pane; el.classList.toggle("is-active", active); el.setAttribute("aria-selected", String(active)); });
   }
   PYL.views.venta = {
@@ -35,6 +51,17 @@
       if (event.type === "change" && event.target.id === "sale-category") { category = event.target.value; catalog(); return; }
       var el = event.target.closest("[data-action]"); if (!el) return;
       var action = el.dataset.action, sale = s.getCurrentSale();
+      if (event.type === "input" && action === "item-qty") {
+        var qty = Number(el.value);
+        if (el.value === "" || !Number.isInteger(qty) || qty < 1) return;
+        var item = sale.items.find(function (i) { return i.productoId === el.dataset.id; });
+        try { s.updateItemQty(el.dataset.id, qty); }
+        catch (error) { if (item) el.value = item.cantidad; throw error; }
+        el.closest(".ticket-line").querySelector(".ticket-sub").textContent = u.formatCurrency(item.precio * item.cantidad);
+        document.querySelectorAll("#ticket-root .totals dd").forEach(function (dd) { dd.textContent = u.formatCurrency(s.currentTotal()); });
+        updateCatalogStock();
+        return;
+      }
       if (event.type === "change") {
         if (action === "client") s.setSaleField("clienteId", el.value);
         if (action === "pay-method") { s.setSaleField("metodoPago", el.value); ticket(); }

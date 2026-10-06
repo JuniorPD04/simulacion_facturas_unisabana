@@ -24,7 +24,10 @@ const { createBackend, root } = require("./helpers.cjs");
     const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" };
     res.setHeader("Content-Type", types[path.extname(target)] || "application/octet-stream");
     let content = fs.readFileSync(target);
-    if (url.pathname === "/js/api.js") content = content.toString().replace('var API_URL = "";', 'var API_URL = location.origin + "/test-api";');
+    if (url.pathname === "/js/api.js") {
+      content = content.toString().replace(/var API_URL = "[^"]*";/, 'var API_URL = location.origin + "/test-api";');
+      assert.ok(content.includes('var API_URL = location.origin + "/test-api";'), "Browser tests must use the simulated service.");
+    }
     res.end(content);
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -57,7 +60,31 @@ const { createBackend, root } = require("./helpers.cjs");
     await page.getByLabel("Categoria", { exact: true }).selectOption({ label: "Papeleria de prueba" });
     await page.getByLabel("Precio de venta").fill("100"); await page.getByLabel("Costo", { exact: true }).fill("40"); await page.getByLabel("Stock", { exact: true }).fill("5"); await saved();
     await nav("Nueva venta");
+    const catalogQty = page.locator("[data-qty-for]");
+    await catalogQty.fill("6");
     await page.getByRole("button", { name: "Agregar", exact: true }).click();
+    await page.locator("#toast-root").getByText("Stock insuficiente para Cuaderno de prueba. Disponible: 5").waitFor();
+    assert.equal(await page.locator("#ticket-root .ticket-line").count(), 0);
+    await catalogQty.fill("1");
+    await page.getByRole("button", { name: "Agregar", exact: true }).click();
+    const ticketQty = page.locator("#ticket-root .ticket-qty");
+    assert.equal(await ticketQty.getAttribute("max"), "5");
+    assert.equal(await catalogQty.getAttribute("max"), "4");
+    await ticketQty.fill("100");
+    await page.locator("#toast-root").getByText("Stock insuficiente para Cuaderno de prueba. Disponible: 5").waitFor();
+    assert.equal(await ticketQty.inputValue(), "1");
+    assert.equal(await page.evaluate(() => PYL.store.currentTotal()), 100);
+    await ticketQty.fill("5");
+    await page.waitForFunction(() => PYL.store.getCurrentSale().items[0].cantidad === 5);
+    assert.equal(await page.getByRole("button", { name: "Agregar", exact: true }).isDisabled(), true);
+    await ticketQty.fill("1");
+    await page.waitForFunction(() => PYL.store.getCurrentSale().items[0].cantidad === 1);
+    assert.equal(await page.getByRole("button", { name: "Agregar", exact: true }).isEnabled(), true);
+    await catalogQty.fill("5");
+    await page.getByRole("button", { name: "Agregar", exact: true }).click();
+    await page.locator("#toast-root").getByText("Stock insuficiente para Cuaderno de prueba. Disponible: 5").waitFor();
+    assert.equal(await page.evaluate(() => PYL.store.getCurrentSale().items[0].cantidad), 1);
+    await catalogQty.fill("1");
     await page.getByRole("button", { name: "Editar Cuaderno de prueba", exact: true }).click();
     assert.equal(await page.locator('[data-form="product"] [name="stock"]').count(), 0);
     await page.getByLabel("Precio de venta").fill("120"); await saved();
@@ -115,7 +142,7 @@ const { createBackend, root } = require("./helpers.cjs");
       }
     }
     assert.deepEqual(errors, []);
-    console.log("Browser OK: CRUD, ventas abiertas, Debe, factura, compras, referencias y cuatro anchos sin desbordamiento.");
+    console.log("Browser OK: stock al agregar/editar, CRUD, ventas abiertas, Debe, factura, compras, referencias y cuatro anchos sin desbordamiento.");
   } finally {
     if (browser) await browser.close();
     await new Promise(resolve => server.close(resolve));

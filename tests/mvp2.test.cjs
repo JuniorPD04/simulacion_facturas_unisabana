@@ -58,6 +58,52 @@ test("inventario fresco del servicio prevalece sobre el navegador; fallos conser
   assert.equal(store.getCurrentSale().items[0].cantidad, 4);
 });
 
+test("ticket valida stock al agregar y editar sin alterar cantidades validas", async () => {
+  const backend = createBackend(); seed(backend);
+  const { store, calls } = createStore(backend); await store.init();
+  assert.throws(() => store.addItem("product", 6), /Stock insuficiente.*Producto.*5/);
+  assert.equal(store.getCurrentSale().items.length, 0);
+  store.addItem("product", 3);
+  assert.equal(store.availableStock(store.getProduct("product")), 2);
+  assert.throws(() => store.addItem("product", 3), /Stock insuficiente/);
+  assert.equal(store.getCurrentSale().items[0].cantidad, 3);
+  store.addItem("product", 2);
+  assert.equal(store.availableStock(store.getProduct("product")), 0);
+  assert.throws(() => store.updateItemQty("product", 100), /Stock insuficiente/);
+  assert.equal(store.getCurrentSale().items[0].cantidad, 5);
+  store.updateItemQty("product", 2);
+  assert.equal(store.availableStock(store.getProduct("product")), 3);
+  store.removeItem("product");
+  assert.equal(store.availableStock(store.getProduct("product")), 5);
+  assert.equal(backend.get("productos").data[0].stock, 5);
+  assert.equal(calls.length, 0);
+});
+
+test("sin stock no se agrega; servicios sin seguimiento no tienen limite", async () => {
+  const backend = createBackend(); seed(backend);
+  backend.post("productos", "update", { id: "product", stock: 0 });
+  const { store } = createStore(backend); await store.init();
+  assert.throws(() => store.addItem("product", 1), /Stock insuficiente/);
+  store.addItem("service", 100);
+  store.updateItemQty("service", 1000);
+  assert.equal(store.getCurrentSale().items[0].cantidad, 1000);
+  assert.equal(store.availableStock(store.getProduct("service")), Infinity);
+});
+
+test("venta abierta con stock reducido puede retomarse y corregirse sin perder items", async () => {
+  const backend = createBackend(); seed(backend);
+  const { store } = createStore(backend); await store.init();
+  store.addItem("product", 5); store.setSaleField("metodoPago", "Nequi");
+  const opened = await store.saveDraft();
+  backend.post("productos", "update", { id: "product", stock: 2 });
+  await store.reload(); await store.resumeDraft(opened.record.id);
+  assert.equal(store.getCurrentSale().items[0].cantidad, 5);
+  await assert.rejects(store.closeSale(), /Stock insuficiente/);
+  store.updateItemQty("product", 2);
+  await store.closeSale();
+  assert.equal(store.getProduct("product").stock, 0);
+});
+
 test("compra aumenta stock, actualiza costo, respeta servicios e idempotencia", async () => {
   const backend = createBackend(); seed(backend);
   const { store, calls } = createStore(backend); await store.init();
@@ -126,9 +172,10 @@ test("cliente API usa fetch JSON, text/plain y propaga errores", async () => {
   const context = vm.createContext({ window: {}, URL, fetch: async (url, options) => {
     requests.push({ url, options }); return { ok: true, json: async () => response };
   } });
-  vm.runInContext(fs.readFileSync(root + "/js/api.js", "utf8").replace('var API_URL = "";', 'var API_URL = "https://example.com/exec";'), context);
+  vm.runInContext(fs.readFileSync(root + "/js/api.js", "utf8").replace(/var API_URL = "[^"]*";/, 'var API_URL = "https://example.com/exec";'), context);
   const api = context.window.PYL.api;
   await api.apiGet("productos"); await api.apiPost("clientes", "create", { id: "1", nombre: "Test" });
+  assert.equal(new URL(requests[0].url).hostname, "example.com");
   assert.equal(requests[1].options.headers["Content-Type"], "text/plain;charset=utf-8");
   assert.equal(JSON.parse(requests[1].options.body).action, "create");
   response = { success: false, message: "Rechazado" };
