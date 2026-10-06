@@ -58,12 +58,14 @@ function fila(resource, id) {
 }
 function escribir(resource, row, number) {
   var sheet = hoja(resource);
-  var values = SCHEMA[resource].map(function (key) {
-    var value = row[key] == null ? "" : row[key];
-    // User strings must remain text, never spreadsheet formulas.
-    return typeof value === "string" && /^[=+@]/.test(value) ? "'" + value : value;
+  var rowNumber = number || sheet.getLastRow() + 1;
+  var values = SCHEMA[resource].map(function (key) { return row[key] == null ? "" : row[key]; });
+  // Formato de texto en celdas con string antes de escribir: evita que Sheets
+  // convierta codigos, telefonos o fechas, y que un valor empiece con = + @ se lea como formula.
+  values.forEach(function (value, i) {
+    if (typeof value === "string") sheet.getRange(rowNumber, i + 1).setNumberFormat("@");
   });
-  sheet.getRange(number || sheet.getLastRow() + 1, 1, 1, values.length).setValues([values]);
+  sheet.getRange(rowNumber, 1, 1, values.length).setValues([values]);
 }
 function conBloqueo(fn) {
   var lock = LockService.getScriptLock();
@@ -75,7 +77,12 @@ function conBloqueo(fn) {
   } finally { if (lock.hasLock()) lock.releaseLock(); }
 }
 function doGet(event) {
-  return conBloqueo(function () { return leer(event && event.parameter && event.parameter.resource); });
+  // Las lecturas no modifican la hoja: no necesitan el bloqueo del script.
+  try {
+    return responder({ success: true, data: leer(event && event.parameter && event.parameter.resource) });
+  } catch (error) {
+    return responder({ success: false, message: error.message || String(error) });
+  }
 }
 function doPost(event) {
   return conBloqueo(function () {
@@ -146,7 +153,7 @@ function validar(resource, row) {
     row.codigo = texto(row.codigo, "Codigo");
     exigir(!leer("productos").some(function (p) { return p.id !== row.id && p.codigo.toLowerCase() === row.codigo.toLowerCase(); }), "Ya existe un producto con ese codigo.");
     referencia("categorias", row.categoriaId, "La categoria");
-    row.precio = numero(row.precio, "Precio"); row.costo = numero(row.costo, "Costo");
+    row.precio = numero(row.precio, "Precio", true); row.costo = numero(row.costo, "Costo", true);
     exigir([true, false, "true", "false", "TRUE", "FALSE"].includes(row.seguimientoInventario), "seguimientoInventario debe ser booleano.");
     row.seguimientoInventario = String(row.seguimientoInventario).toLowerCase() === "true";
     row.stock = row.seguimientoInventario ? numero(row.stock, "Stock", true) : 0;
@@ -161,8 +168,8 @@ function validar(resource, row) {
       var quantity = numero(i.cantidad, "Cantidad", true);
       exigir(quantity > 0, "La cantidad debe ser mayor que cero.");
       var p = buscar("productos", i.productoId);
-      var item = { productoId: p.id, codigo: texto(i.codigo, "Codigo del item"), nombre: texto(i.nombre, "Nombre del item"), cantidad: quantity, costo: numero(i.costo, "Costo del item") };
-      if (resource === "ventas") item.precio = numero(i.precio, "Precio del item");
+      var item = { productoId: p.id, codigo: texto(i.codigo, "Codigo del item"), nombre: texto(i.nombre, "Nombre del item"), cantidad: quantity, costo: numero(i.costo, "Costo del item", true) };
+      if (resource === "ventas") item.precio = numero(i.precio, "Precio del item", true);
       return item;
     });
     row.itemsJson = JSON.stringify(items);
@@ -175,7 +182,7 @@ function validar(resource, row) {
       if (row.clienteId) referencia("clientes", row.clienteId, "El cliente");
       exigir(!(row.estado === "cerrada" && row.metodoPago === "Debe" && !row.clienteId), "El pago Debe requiere un cliente.");
       row.subtotal = row.total;
-      row.valorRecibido = numero(row.valorRecibido, "Valor recibido");
+      row.valorRecibido = numero(row.valorRecibido, "Valor recibido", true);
       if (row.metodoPago === "Nequi") row.valorRecibido = row.total;
       if (row.metodoPago === "Debe") row.valorRecibido = 0;
       if (row.estado === "cerrada" && row.metodoPago === "Efectivo") exigir(row.valorRecibido >= row.total, "El valor recibido no cubre el total.");
@@ -240,7 +247,9 @@ function validarEliminacion(resource, id, row) {
   }), "El producto tiene ventas abiertas asociadas.");
 }
 
+function redondear(value) { return Math.round(Number(value) || 0); }
 // One-time migration: paste the exported MVP1 JSON into the wrapper documented in README.
+// MVP1 guardaba dinero con decimales; se redondea al entero mas cercano al migrar.
 function migrarMVP1(datos) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
@@ -256,7 +265,7 @@ function migrarMVP1(datos) {
         categories[name.toLowerCase()] = category.id;
         escribir("categorias", category);
       }
-      escribir("productos", { id: p.id, codigo: p.codigoInterno || p.codigo, nombre: p.nombre, categoriaId: categories[name.toLowerCase()], precio: p.precio, costo: p.costo, seguimientoInventario: p.seguimientoInventario, stock: p.stock });
+      escribir("productos", { id: p.id, codigo: p.codigoInterno || p.codigo, nombre: p.nombre, categoriaId: categories[name.toLowerCase()], precio: redondear(p.precio), costo: redondear(p.costo), seguimientoInventario: p.seguimientoInventario, stock: p.stock });
     });
     var sales = (datos.sales || []).slice();
     if (datos.currentSale && datos.currentSale.items && datos.currentSale.items.length) {
@@ -274,12 +283,12 @@ function migrarMVP1(datos) {
       }
       var items = (sale.items || []).map(function (i) {
         var p = buscar("productos", i.productId || i.productoId);
-        return { productoId: i.productId || i.productoId, codigo: i.codigoInterno || i.codigo, nombre: i.nombre, precio: i.precio, costo: i.costo == null ? p ? p.costo : 0 : i.costo, cantidad: i.cantidad };
+        return { productoId: i.productId || i.productoId, codigo: i.codigoInterno || i.codigo, nombre: i.nombre, precio: redondear(i.precio), costo: redondear(i.costo == null ? (p ? p.costo : 0) : i.costo), cantidad: i.cantidad };
       });
       if (!items.length) return;
       var total = items.reduce(function (sum, i) { return sum + i.precio * i.cantidad; }, 0);
       var method = { efectivo: "Efectivo", nequi: "Nequi", debe: "Debe" }[sale.metodoPago] || sale.metodoPago || "Efectivo";
-      escribir("ventas", { id: sale.id, fecha: sale.fecha || new Date().toISOString(), estado: sale.estado === "cerrada" ? "cerrada" : "abierta", clienteId: clientId, metodoPago: method, subtotal: total, total: total, valorRecibido: Number(sale.valorRecibido) || 0, cambio: Number(sale.cambio) || 0, itemsJson: JSON.stringify(items), actualizadoEn: new Date().toISOString() });
+      escribir("ventas", { id: sale.id, fecha: sale.fecha || new Date().toISOString(), estado: sale.estado === "cerrada" ? "cerrada" : "abierta", clienteId: clientId, metodoPago: method, subtotal: total, total: total, valorRecibido: redondear(sale.valorRecibido), cambio: redondear(sale.cambio), itemsJson: JSON.stringify(items), actualizadoEn: new Date().toISOString() });
     });
     // Imported stock already includes closed MVP1 sales; do not debit it again.
     SpreadsheetApp.flush();

@@ -28,6 +28,12 @@
     }).format(date);
   }
 
+  function localDateKey(iso) {
+    var date = iso ? new Date(iso) : new Date();
+    if (Number.isNaN(date.getTime())) return "";
+    return date.getFullYear() + "-" + pad(date.getMonth() + 1, 2) + "-" + pad(date.getDate(), 2);
+  }
+
   function pad(number, size) {
     var text = String(number);
     while (text.length < size) text = "0" + text;
@@ -60,18 +66,14 @@
     return method || "Sin pago";
   }
 
-  function categoryImage(categoria) {
-    var map = {
-      Cuadernos: "assets/cuadernos.svg",
-      Escritura: "assets/escritura.svg",
-      Impresion: "assets/impresion.svg",
-      Impresión: "assets/impresion.svg",
-      Arte: "assets/arte.svg",
-      Oficina: "assets/oficina.svg",
-      Tecnología: "assets/tecnologia.svg",
-      Tecnologia: "assets/tecnologia.svg"
-    };
-    return map[categoria] || "assets/oficina.svg";
+  var CATEGORY_IMAGES = ["assets/cuadernos.svg", "assets/escritura.svg", "assets/impresion.svg", "assets/arte.svg", "assets/oficina.svg", "assets/tecnologia.svg"];
+  var CATEGORY_IMAGE_FALLBACK = "assets/oficina.svg";
+
+  function categoryImage(categoriaId) {
+    if (!categoriaId) return CATEGORY_IMAGE_FALLBACK;
+    var hash = 0, text = String(categoriaId);
+    for (var i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+    return CATEGORY_IMAGES[hash % CATEGORY_IMAGES.length];
   }
 
   function iconPencil() {
@@ -98,6 +100,7 @@
     escapeHtml: escapeHtml,
     formatCurrency: formatCurrency,
     formatDateTime: formatDateTime,
+    localDateKey: localDateKey,
     pad: pad,
     toNonNegativeNumber: toNonNegativeNumber,
     toNonNegativeInteger: toNonNegativeInteger,

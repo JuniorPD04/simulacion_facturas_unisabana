@@ -8,11 +8,11 @@ function createBackend() {
   const sheets = new Map();
   let failure = null;
   class Sheet {
-    constructor(name) { this.name = name; this.rows = []; }
+    constructor(name) { this.name = name; this.rows = []; this.formats = []; }
     getLastRow() { return this.rows.length; }
     setFrozenRows() {}
-    deleteRow(number) { this.rows.splice(number - 1, 1); }
-    getRange(row, col, height, width) {
+    deleteRow(number) { this.rows.splice(number - 1, 1); this.formats.splice(number - 1, 1); }
+    getRange(row, col, height = 1, width = 1) {
       return {
         getValues: () => Array.from({ length: height }, (_, i) => Array.from({ length: width }, (_, j) => this.rows[row - 1 + i]?.[col - 1 + j] ?? "")),
         setValues: (values) => {
@@ -21,6 +21,12 @@ function createBackend() {
             this.rows[row - 1 + i] ||= [];
             value.forEach((cell, j) => { this.rows[row - 1 + i][col - 1 + j] = cell; });
           });
+        },
+        setNumberFormat: (format) => {
+          for (let i = 0; i < height; i++) {
+            this.formats[row - 1 + i] ||= [];
+            for (let j = 0; j < width; j++) this.formats[row - 1 + i][col - 1 + j] = format;
+          }
         }
       };
     }
@@ -42,7 +48,8 @@ function createBackend() {
     context,
     get: resource => decode(context.doGet({ parameter: { resource } })),
     post: (resource, action, data) => decode(context.doPost({ parameter: { resource }, postData: { contents: JSON.stringify({ action, data }) } })),
-    failOnce: fn => { failure = fn; }
+    failOnce: fn => { failure = fn; },
+    format: (resource, row, col) => sheets.get(resource)?.formats?.[row - 1]?.[col - 1]
   };
 }
 function createStore(backend, overrides = {}) {

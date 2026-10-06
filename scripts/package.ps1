@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$destination = Join-Path $projectRoot 'perez-quispe-zona-mvp2-web-2026-2.zip'
+$destination = Join-Path $projectRoot 'desarrollo-web-2026-2-parcial2-perez-quispe-zona.zip'
 $relativePaths = @('index.html', 'js', 'css', 'assets', 'apps-script.gs', 'README.md', 'tests', 'scripts')
 $paths = $relativePaths | ForEach-Object { Join-Path $projectRoot $_ }
 Compress-Archive -LiteralPath $paths -DestinationPath $destination -Force

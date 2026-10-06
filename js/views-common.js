@@ -25,8 +25,8 @@
       (quick ? "" : field("Codigo", "codigo", p.codigo, "text", "required maxlength=80")) +
       field("Nombre", "nombre", p.nombre, "text", "required maxlength=200") +
       '<label class="field">Categoria<select name="categoriaId" aria-label="Categoria" required>' + options("categorias", p.categoriaId) + '</select></label>' +
-      field("Precio de venta", "precio", p.precio, "number", 'required min="0" step="0.01"') +
-      field("Costo", "costo", p.costo, "number", 'required min="0" step="0.01"') +
+      field("Precio de venta", "precio", p.precio, "number", 'required min="0" step="1"') +
+      field("Costo", "costo", p.costo, "number", 'required min="0" step="1"') +
       (quick ? "" : '<label class="check"><input type="checkbox" name="seguimientoInventario"' + (p.seguimientoInventario ? " checked" : "") + '> Control de inventario</label>' +
       field("Stock", "stock", p.stock, "number", 'min="0" step="1"' + (p.seguimientoInventario ? " required" : " disabled"))) +
       '</div><p class="error" role="alert" data-form-error></p><div class="modal__actions"><button class="button button--ghost" type="button" data-modal-cancel>Cancelar</button><button class="button button--primary" type="submit">Guardar</button></div></form>' });

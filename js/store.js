@@ -53,7 +53,7 @@
     };
     if (!value.nombre || !value.codigo) throw new Error("Nombre y codigo son obligatorios.");
     if (!get("categorias", value.categoriaId)) throw new Error("Selecciona una categoria existente.");
-    if (data.precio === "" || data.costo === "" || !Number.isFinite(value.precio) || value.precio < 0 || !Number.isFinite(value.costo) || value.costo < 0) throw new Error("Precio y costo deben ser numeros no negativos.");
+    if (data.precio === "" || data.costo === "" || !Number.isInteger(value.precio) || value.precio < 0 || !Number.isInteger(value.costo) || value.costo < 0) throw new Error("Precio y costo deben ser numeros enteros no negativos.");
     if (!value.seguimientoInventario) value.stock = 0;
     if (value.seguimientoInventario && (data.stock === "" || !Number.isInteger(value.stock) || value.stock < 0)) throw new Error("Stock debe ser un entero no negativo.");
     if (state.productos.some(function (p) { return p.id !== id && p.codigo.toLowerCase() === value.codigo.toLowerCase(); })) throw new Error("Ya existe un producto con ese codigo.");
@@ -77,7 +77,8 @@
     if (status === "cerrada") {
       if (!inventoryFresh) throw new Error("Actualiza los datos antes de cerrar otra venta.");
       if (currentSale.metodoPago === "Debe" && !currentSale.clienteId) throw new Error("Selecciona un cliente para el pago Debe.");
-      if (currentSale.metodoPago === "Efectivo" && (currentSale.valorRecibido === "" || !Number.isFinite(received) || received < amount)) throw new Error("El valor recibido debe cubrir el total.");
+      if (currentSale.metodoPago === "Efectivo" && (currentSale.valorRecibido === "" || !Number.isInteger(received) || received < 0)) throw new Error("El valor recibido debe ser un numero entero no negativo.");
+      if (currentSale.metodoPago === "Efectivo" && received < amount) throw new Error("El valor recibido debe cubrir el total.");
       currentSale.items.forEach(function (i) {
         var p = get("productos", i.productoId);
         if (!p) throw new Error("El producto " + i.nombre + " ya no existe.");
@@ -119,7 +120,7 @@
     getSale: function (id) { return this.get("ventas", id); },
     getCurrentSale: function () { return currentSale; },
     newSale: function () { currentSale = emptySale(); },
-    clearSale: function () { currentSale.items = []; currentSale.paso = "items"; currentSale.valorRecibido = ""; },
+    clearSale: function () { currentSale = emptySale(); },
     setSaleField: function (field, value) { if (["clienteId", "metodoPago", "valorRecibido", "paso"].includes(field)) currentSale[field] = value; },
     currentTotal: function () { return total(currentSale.items, "precio"); },
     lineSubtotal: function (i) { return i.precio * i.cantidad; },
@@ -147,7 +148,8 @@
     saveDraft: function () { return saveSale("abierta"); },
     closeSale: function () { return saveSale("cerrada"); },
     resumeDraft: async function (id) {
-      if (currentSale.items.length && currentSale.id !== id) await saveSale("abierta");
+      if (currentSale.id === id) { currentSale.paso = "items"; return; }
+      if (currentSale.items.length) await saveSale("abierta");
       var row = get("ventas", id);
       if (!row || row.estado !== "abierta") throw new Error("La venta abierta ya no existe.");
       currentSale = Object.assign({}, clone(row), { paso: "items" });
@@ -189,7 +191,7 @@
         if (!purchase.items.length) throw new Error("Agrega al menos un producto.");
         purchase.items.forEach(function (i) {
           if (!get("productos", i.productoId)) throw new Error("El producto " + i.nombre + " ya no existe.");
-          if (!Number.isInteger(i.cantidad) || i.cantidad < 1 || !Number.isFinite(i.costo) || i.costo < 0) throw new Error("Revisa cantidades y costos de la compra.");
+          if (!Number.isInteger(i.cantidad) || i.cantidad < 1 || !Number.isInteger(i.costo) || i.costo < 0) throw new Error("Revisa cantidades y costos de la compra: deben ser numeros enteros no negativos.");
         });
         var saved = put("compras", await PYL.api.apiPost("compras", "create", {
           id: purchase.id, fecha: purchase.fecha, proveedorId: purchase.proveedorId,

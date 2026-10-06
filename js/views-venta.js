@@ -4,7 +4,7 @@
   function catalog() {
     var list = s.getProducts().filter(function (p) { return (!category || p.categoriaId === category) && (p.nombre + " " + p.codigo).toLowerCase().includes(search.toLowerCase()); });
     document.getElementById("catalog-grid").innerHTML = list.length ? list.map(function (p) {
-      return '<article class="product-card"><img src="' + u.categoryImage(s.label("categorias", p.categoriaId)) + '" alt=""><div><div class="product-title"><h3>' + u.escapeHtml(p.nombre) + '</h3>' + c.icon("quick-edit", p.id, "Editar " + p.nombre, u.iconPencil()) + '</div><p class="product-card__meta">' + u.escapeHtml(p.codigo + " / " + s.label("categorias", p.categoriaId)) + '</p><strong>' + u.formatCurrency(p.precio) + '</strong><p class="product-card__stock">' + (p.seguimientoInventario ? "Stock: " + p.stock : "Sin control de inventario") + '</p><div class="qty-add"><input type="number" min="1" step="1" value="1" data-qty-for="' + u.escapeHtml(p.id) + '" aria-label="Cantidad de ' + u.escapeHtml(p.nombre) + '"><button class="button button--primary" data-action="add-item" data-id="' + u.escapeHtml(p.id) + '">Agregar</button></div></div></article>';
+      return '<article class="product-card"><img src="' + u.categoryImage(p.categoriaId) + '" alt=""><div><div class="product-title"><h3>' + u.escapeHtml(p.nombre) + '</h3>' + c.icon("quick-edit", p.id, "Editar " + p.nombre, u.iconPencil()) + '</div><p class="product-card__meta">' + u.escapeHtml(p.codigo + " / " + s.label("categorias", p.categoriaId)) + '</p><strong>' + u.formatCurrency(p.precio) + '</strong><p class="product-card__stock">' + (p.seguimientoInventario ? "Stock: " + p.stock : "Sin control de inventario") + '</p><div class="qty-add"><input type="number" min="1" step="1" value="1" data-qty-for="' + u.escapeHtml(p.id) + '" aria-label="Cantidad de ' + u.escapeHtml(p.nombre) + '"><button class="button button--primary" data-action="add-item" data-id="' + u.escapeHtml(p.id) + '">Agregar</button></div></div></article>';
     }).join("") : '<p class="empty-note">No hay productos con ese criterio.</p>';
     updateCatalogStock();
   }
@@ -24,7 +24,7 @@
     var received = Number(sale.valorRecibido), change = received - s.currentTotal();
     return '<div class="pay-form"><h3>Pago</h3><fieldset class="pay-methods"><legend>Metodo de pago</legend>' + s.payments.map(function (m) {
       return '<label class="check"><input type="radio" name="metodoPago" value="' + m + '" data-action="pay-method"' + (sale.metodoPago === m ? " checked" : "") + '>' + m + '</label>';
-    }).join("") + '</fieldset>' + (sale.metodoPago === "Efectivo" ? '<label class="field">Valor recibido<input type="number" min="0" step="0.01" data-action="received" value="' + u.escapeHtml(sale.valorRecibido) + '"></label><p class="change' + (change < 0 ? " is-bad" : "") + '" id="sale-change">Cambio: ' + u.formatCurrency(change) + '</p>' : "") +
+    }).join("") + '</fieldset>' + (sale.metodoPago === "Efectivo" ? '<label class="field">Valor recibido<input type="number" min="0" step="1" data-action="received" value="' + u.escapeHtml(sale.valorRecibido) + '"></label><p class="change' + (change < 0 ? " is-bad" : "") + '" id="sale-change">Cambio: ' + u.formatCurrency(change) + '</p>' : "") +
       '<div class="ticket-actions"><button class="button button--ghost" data-action="back-items">Volver</button><button class="button button--primary" data-action="confirm-sale">Confirmar venta</button></div></div>';
   }
   function ticket() {
@@ -80,7 +80,7 @@
       }
       if (action === "remove-item") { s.removeItem(el.dataset.id); ticket(); }
       if (action === "sale-pane") { pane = el.dataset.paneTab; if (pane === "catalog") s.setSaleField("paso", "items"); ticket(); }
-      if (action === "clear-sale" && await PYL.ui.confirm({ title: "Limpiar ticket", message: "Se quitaran los productos de este ticket. La version guardada permanecera en Ventas.", confirmLabel: "Limpiar" })) { s.clearSale(); ticket(); }
+      if (action === "clear-sale" && await PYL.ui.confirm({ title: "Limpiar ticket", message: "Se iniciara un ticket nuevo y vacio. Si esta venta ya estaba guardada en Ventas, esa version no se modifica.", confirmLabel: "Limpiar" })) { s.clearSale(); ticket(); }
       if (action === "start-pay") { if (!sale.items.length) throw new Error("Agrega al menos un producto."); s.setSaleField("paso", "pago"); ticket(); }
       if (action === "back-items") { s.setSaleField("paso", "items"); ticket(); }
       if (action === "save-sale") await PYL.app.run(async function () { await s.saveDraft(); PYL.app.refresh(); PYL.ui.toast("Venta abierta guardada."); });

@@ -181,3 +181,43 @@ test("cliente API usa fetch JSON, text/plain y propaga errores", async () => {
   response = { success: false, message: "Rechazado" };
   await assert.rejects(api.apiGet("productos"), /Rechazado/);
 });
+
+test("precio, costo y valor recibido deben ser enteros; cualquier entero valido se acepta", async () => {
+  const backend = createBackend(); seed(backend);
+  assert.match(backend.post("productos", "update", { id: "product", precio: 100.5 }).message, /entero/);
+  assert.match(backend.post("productos", "create", { id: "nuevo", codigo: "P-999", nombre: "Otro", categoriaId: "cat", precio: 100, costo: 40.25, seguimientoInventario: false }).message, /entero/);
+  assert.equal(backend.post("productos", "create", { id: "nuevo", codigo: "P-999", nombre: "Otro", categoriaId: "cat", precio: 12345, costo: 40, seguimientoInventario: false }).success, true);
+  const { store } = createStore(backend); await store.init();
+  await assert.rejects(store.saveProduct({ nombre: "X", codigo: "P-500", categoriaId: "cat", precio: 100.5, costo: 40, stock: 5, seguimientoInventario: true }, null, false), /entero/);
+  store.addItem("product", 1); store.setSaleField("metodoPago", "Efectivo"); store.setSaleField("valorRecibido", 100.5);
+  await assert.rejects(store.closeSale(), /entero/);
+  store.setSaleField("valorRecibido", 100);
+  await store.closeSale();
+  await assert.rejects(store.createPurchase({ id: "purchase-dec", fecha: "2026-10-05", proveedorId: "provider", items: [{ productoId: "product", codigo: "P-001", nombre: "Producto de prueba", cantidad: 1, costo: 45.5 }] }), /entero/);
+});
+
+test("resumeDraft no pisa el ticket en curso si es la misma venta; clearSale inicia un ticket nuevo", async () => {
+  const backend = createBackend(); seed(backend);
+  const { store } = createStore(backend); await store.init();
+  store.addItem("product", 1); store.setSaleField("metodoPago", "Nequi"); store.setSaleField("clienteId", "client");
+  const opened = await store.saveDraft();
+  await store.resumeDraft(opened.record.id);
+  store.addItem("product", 1);
+  await store.resumeDraft(opened.record.id);
+  assert.equal(store.getCurrentSale().id, opened.record.id);
+  assert.equal(store.getCurrentSale().items[0].cantidad, 2);
+  store.clearSale();
+  assert.notEqual(store.getCurrentSale().id, opened.record.id);
+  assert.equal(store.getCurrentSale().items.length, 0);
+  assert.equal(store.getCurrentSale().metodoPago, "Efectivo");
+  assert.equal(store.getCurrentSale().clienteId, "");
+  const saved = backend.get("ventas").data.find((v) => v.id === opened.record.id);
+  assert.equal(JSON.parse(saved.itemsJson).length, 1);
+});
+
+test("escribir() aplica formato de texto a las celdas con string antes de guardar", async () => {
+  const backend = createBackend(); seed(backend);
+  assert.equal(backend.format("productos", 2, 1), "@"); // id
+  assert.equal(backend.format("productos", 2, 2), "@"); // codigo
+  assert.notEqual(backend.format("productos", 2, 5), "@"); // precio, numerico
+});

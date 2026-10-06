@@ -9,8 +9,11 @@ Zona Malaver.
 
 ## Configuracion obligatoria antes de entregar
 
-La URL del servicio esta vacia en `js/api.js`. El proyecto mostrara un error de
-conexion hasta completar estos pasos con la cuenta Google del equipo.
+La URL del servicio ya esta establecida en `js/api.js` (`API_URL`). Antes de
+entregar, verificar que sea la URL de una implementacion propia publicada como
+aplicacion web, terminada en `/exec` (no la URL del documento de Sheets ni la
+de prueba `/dev`). Si el equipo necesita conectar su propia hoja, seguir estos
+pasos con la cuenta Google del equipo:
 
 1. Crear una hoja de calculo en Google Sheets.
 2. Abrir **Extensiones > Apps Script** desde esa hoja.
@@ -28,6 +31,11 @@ conexion hasta completar estos pasos con la cuenta Google del equipo.
 8. Abrir `index.html`, crear primero categorias, clientes y proveedores; luego
    productos. Tambien se puede importar la informacion de MVP1 como se indica
    mas abajo. Los datos de demostracion se crean en Sheets, no en el codigo.
+
+URL de la aplicacion desplegada: http://solylunastore.vercel.app/
+
+Datos del comercio para la factura (NIT, direccion, telefono): completar en
+`js/config.js` antes de entregar. Si quedan vacios, la factura no los muestra.
 
 Al modificar el Apps Script, publicar una **nueva version** desde
 **Implementar > Gestionar implementaciones > Editar**.
@@ -53,9 +61,10 @@ sensibles a mayusculas. `prepararHojas` crea esta estructura automaticamente.
 | ventas | id, fecha, estado, clienteId, metodoPago, subtotal, total, valorRecibido, cambio, itemsJson, actualizadoEn |
 | compras | id, fecha, proveedorId, total, itemsJson |
 
-`seguimientoInventario` es booleano. Stock y cantidades son enteros no
-negativos; la cantidad de un item debe ser mayor que cero. Precio y costo deben
-ser numeros no negativos. `itemsJson` contiene un arreglo serializado:
+`seguimientoInventario` es booleano. Todos los valores monetarios (precio,
+costo, valorRecibido, cambio y los precios/costos de los items) y las
+cantidades son numeros enteros no negativos, sin decimales; la cantidad de un
+item debe ser mayor que cero. `itemsJson` contiene un arreglo serializado:
 
 ```js
 // Venta
@@ -90,8 +99,11 @@ el servicio.
 
 Ventas abiertas se guardan en Sheets y pueden retomarse desde Ventas. Retomar
 una venta conserva su registro y guarda primero otro ticket en curso, si tiene
-productos. Limpiar un ticket no elimina la version guardada; descartar una venta
-abierta en Ventas si elimina ese registro. Al agregar o editar cantidades del
+productos; retomar la misma venta que ya esta en curso no reemplaza el ticket
+actual. Limpiar inicia un ticket nuevo y vacio (id nuevo, sin cliente, metodo
+Efectivo); no modifica ni elimina la version guardada de la venta que se
+estaba editando. Descartar una venta abierta en Ventas si elimina ese registro.
+Al agregar o editar cantidades del
 ticket se comprueba el stock acumulado por producto y se rechaza el exceso,
 conservando la ultima cantidad valida. Agregar se deshabilita cuando todo el
 stock disponible ya esta en el ticket. Los productos sin seguimiento de
@@ -104,6 +116,12 @@ editan desde Productos. Las ventas cerradas conservan los valores de sus items.
 Las categorias, clientes y proveedores asociados no se pueden eliminar; tampoco
 productos presentes en ventas abiertas. Productos que solo aparecen en documentos
 cerrados se pueden eliminar porque sus items contienen una instantanea.
+
+El descuento de stock al cerrar una venta y la suma de stock al registrar una
+compra ocurren dentro de `apps-script.gs`, en la misma peticion que crea el
+documento (venta o compra), no en una peticion aparte desde el navegador. Esto
+evita que un documento quede registrado sin que el inventario se actualice, o
+que un reintento tras perder la respuesta descuente o sume el stock dos veces.
 
 **Inventario:** Apps Script ejecuta el registro y sus movimientos dentro de un
 bloqueo del script, valida el stock actual, guarda primero el documento y despues
@@ -155,9 +173,23 @@ antes de volver a ejecutar; el importador rechaza hojas con registros.
 
 ## Ejecucion y despliegue
 
-Abrir `index.html` directamente; todas las rutas y recursos son relativos.
-Tambien se puede usar Live Server. La factura se imprime desde
-**Imprimir / PDF**; elegir Guardar como PDF en el dialogo del navegador.
+Abrir `index.html` directamente en el navegador; todas las rutas y recursos
+son relativos. Si se necesita un servidor (por ejemplo para probar con otro
+dispositivo en la misma red), levantar uno estatico desde la linea de
+comandos en la carpeta del proyecto:
+
+```powershell
+python -m http.server 8000
+```
+
+o, con Node.js instalado:
+
+```powershell
+npx serve .
+```
+
+La factura se imprime desde **Imprimir / PDF**; elegir Guardar como PDF en el
+dialogo del navegador.
 
 Para GitHub Pages:
 
@@ -197,7 +229,7 @@ inexistente en el servicio.
 
 ## Entrega
 
-Formato del aula: **perez-quispe-zona-mvp2-web-2026-2.zip**.
+Formato del aula: **desarrollo-web-2026-2-parcial2-perez-quispe-zona.zip**.
 Generar o actualizar el ZIP despues de configurar `API_URL`:
 
 ```powershell

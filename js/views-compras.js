@@ -1,6 +1,6 @@
 (function (global) {
   var PYL = global.PYL, u = PYL.utils, s = PYL.store, c = PYL.components;
-  var draft = null, search = "";
+  var draft = null, search = "", provider = "", dateFrom = "", dateTo = "";
   function newDraft() {
     var now = new Date(); now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     return { id: crypto.randomUUID(), fecha: now.toISOString().slice(0, 10), proveedorId: "", items: [] };
@@ -16,22 +16,33 @@
   }
   function lines() {
     document.getElementById("purchase-lines").innerHTML = draft.items.length ? draft.items.map(function (i) {
-      return '<div class="purchase-line"><strong>' + u.escapeHtml(i.nombre) + '</strong><label class="field">Cantidad<input type="number" min="1" step="1" required data-action="purchase-qty" data-id="' + u.escapeHtml(i.productoId) + '" value="' + i.cantidad + '"></label><label class="field">Costo unitario<input type="number" min="0" step="0.01" required data-action="purchase-cost" data-id="' + u.escapeHtml(i.productoId) + '" value="' + i.costo + '"></label>' + c.icon("purchase-remove", i.productoId, "Quitar " + i.nombre, u.iconTrash(), true) + '</div>';
+      return '<div class="purchase-line"><strong>' + u.escapeHtml(i.nombre) + '</strong><label class="field">Cantidad<input type="number" min="1" step="1" required data-action="purchase-qty" data-id="' + u.escapeHtml(i.productoId) + '" value="' + i.cantidad + '"></label><label class="field">Costo unitario<input type="number" min="0" step="1" required data-action="purchase-cost" data-id="' + u.escapeHtml(i.productoId) + '" value="' + i.costo + '"></label>' + c.icon("purchase-remove", i.productoId, "Quitar " + i.nombre, u.iconTrash(), true) + '</div>';
     }).join("") : '<p class="empty-note">Sin productos.</p>';
     updateTotal();
   }
   function updateTotal() { document.getElementById("purchase-total").textContent = "Total: " + u.formatCurrency(draft.items.reduce(function (sum, i) { return sum + (Number(i.costo) || 0) * (Number(i.cantidad) || 0); }, 0)); }
   function rows() {
-    var list = s.list("compras").sort(function (a, b) { return b.fecha.localeCompare(a.fecha); }).filter(function (p) { return (p.id + " " + s.label("proveedores", p.proveedorId)).toLowerCase().includes(search.toLowerCase()); });
+    var list = s.list("compras").sort(function (a, b) { return b.fecha.localeCompare(a.fecha); }).filter(function (p) {
+      var day = p.fecha.slice(0, 10);
+      return (!provider || p.proveedorId === provider) && (!dateFrom || day >= dateFrom) && (!dateTo || day <= dateTo) &&
+        (p.id + " " + s.label("proveedores", p.proveedorId)).toLowerCase().includes(search.toLowerCase());
+    });
     document.getElementById("purchases-list").innerHTML = list.length ? list.map(function (p) {
       return '<article class="record-row"><strong>C-' + u.escapeHtml(p.id.slice(0, 8).toUpperCase()) + '</strong><div>' + u.escapeHtml(s.label("proveedores", p.proveedorId)) + '<p>' + u.escapeHtml(p.fecha.slice(0, 10)) + '</p></div><strong>' + u.formatCurrency(p.total) + '</strong>' + c.icon("purchase-detail", p.id, "Ver compra", u.iconEye()) + '</article>';
     }).join("") : '<p class="empty-note">No hay compras con ese criterio.</p>';
   }
   PYL.views.compras = {
-    render: function () { return '<section class="stack"><div class="panel-head"><h2>Compras</h2><button class="button button--primary" data-action="new-purchase">Nueva compra</button></div><label class="search">Buscar<input id="purchase-search" type="search" value="' + u.escapeHtml(search) + '" placeholder="Proveedor o numero"></label><div id="purchases-list" class="stack"></div></section>'; },
+    render: function () { return '<section class="stack"><div class="panel-head"><h2>Compras</h2><button class="button button--primary" data-action="new-purchase">Nueva compra</button></div><div class="history-filters"><label class="search">Buscar<input id="purchase-search" type="search" value="' + u.escapeHtml(search) + '" placeholder="Proveedor o numero"></label>' +
+      '<label class="field">Filtrar por proveedor<select id="purchase-filter-provider" aria-label="Filtrar por proveedor">' + c.options("proveedores", provider, "Todos los proveedores") + '</select></label>' +
+      '<label class="field">Desde<input id="purchase-filter-from" type="date" aria-label="Desde" value="' + u.escapeHtml(dateFrom) + '"></label>' +
+      '<label class="field">Hasta<input id="purchase-filter-to" type="date" aria-label="Hasta" value="' + u.escapeHtml(dateTo) + '"></label>' +
+      '</div><div id="purchases-list" class="stack"></div></section>'; },
     afterRender: rows,
     handle: async function (event) {
       if (event.type === "input" && event.target.id === "purchase-search") { search = event.target.value; rows(); }
+      if (event.type === "change" && event.target.id === "purchase-filter-provider") { provider = event.target.value; rows(); }
+      if (event.type === "change" && event.target.id === "purchase-filter-from") { dateFrom = event.target.value; rows(); }
+      if (event.type === "change" && event.target.id === "purchase-filter-to") { dateTo = event.target.value; rows(); }
       var el = event.target.closest("[data-action]"), action = el ? el.dataset.action : "";
       if (event.type === "change" && action === "purchase-provider") draft.proveedorId = el.value;
       if (event.type === "change" && action === "purchase-date") draft.fecha = el.value;
