@@ -79,6 +79,12 @@ seleccionada por el usuario.
 
 ## Servicio y consistencia
 
+Al cargar o actualizar datos, guardar, editar o eliminar registros, se muestra
+un indicador de carga con el nombre de la operacion. Mientras espera al servicio,
+la interfaz queda bloqueada para evitar envios duplicados. El indicador se retira
+al terminar, incluso si ocurre un error; el formulario conserva sus datos para
+corregirlos. Este comportamiento no requiere cambios en Sheets ni Apps Script.
+
 `js/api.js` concentra el acceso al servicio:
 
 ```js
@@ -141,6 +147,19 @@ la respuesta, usar Actualizar datos y comprobar el historial antes de reintentar
 Si solo falla la recarga del inventario despues de un registro exitoso, se
 informa que el documento ya fue registrado y se exige actualizar antes del
 siguiente cierre o compra.
+
+## Registro de compras
+
+En Compras, elegir Nueva compra y seleccionar un proveedor para todo el
+documento. Buscar productos escribiendo parte de su nombre o codigo; la
+busqueda no distingue mayusculas ni tildes. Agregar los productos necesarios
+desde los resultados y ajustar cantidad y costo unitario en cada linea. Volver
+a agregar el mismo producto incrementa su cantidad sin duplicar la linea.
+Se muestran subtotales por producto y el total de la compra.
+
+Registrar compra guarda todos los productos en una sola fila de compras,
+con un unico proveedorId y un arreglo de items en itemsJson. No requiere
+modificar las pestanas, encabezados ni el Apps Script publicado.
 
 ## Migracion opcional desde MVP1
 

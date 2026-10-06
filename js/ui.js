@@ -12,6 +12,16 @@
     return document.getElementById("modal-root");
   }
 
+  function showLoading(message) {
+    document.getElementById("loading-message").textContent = message || "Procesando...";
+    document.getElementById("loading-root").hidden = false;
+  }
+
+  function hideLoading() {
+    document.getElementById("loading-root").hidden = true;
+    document.getElementById("loading-message").textContent = "";
+  }
+
   function toast(message, type) {
     var root = toastRoot();
     if (!root) return;
@@ -124,6 +134,8 @@
   }
 
   PYL.ui = {
+    showLoading: showLoading,
+    hideLoading: hideLoading,
     toast: toast,
     confirm: confirm,
     open: open,

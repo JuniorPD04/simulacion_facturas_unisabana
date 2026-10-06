@@ -34,7 +34,7 @@
   async function remove(resource, id) {
     var ok = await PYL.ui.confirm({ title: "Eliminar registro", message: "Esta accion eliminara el registro seleccionado.", confirmLabel: "Eliminar", danger: true });
     if (!ok) return;
-    await PYL.app.run(async function () { await s.deleteRecord(resource, id); PYL.ui.closeModal(); PYL.app.refresh(); PYL.ui.toast("Registro eliminado."); });
+    await PYL.app.run(async function () { await s.deleteRecord(resource, id); PYL.ui.closeModal(); PYL.app.refresh(); PYL.ui.toast("Registro eliminado."); }, "Eliminando registro...");
   }
   PYL.components = {
     options: options, field: field, icon: icon, lines: lines, productForm: productForm, remove: remove,
@@ -53,7 +53,7 @@
       await PYL.app.run(async function () {
         await s.saveProduct(data, form.dataset.id || null, form.dataset.quick === "true");
         PYL.ui.closeModal(); PYL.app.refresh(); PYL.ui.toast("Producto guardado.");
-      });
+      }, form.dataset.id ? "Actualizando producto..." : "Guardando producto...");
       return true;
     }
   };

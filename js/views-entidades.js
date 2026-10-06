@@ -28,7 +28,8 @@
       if (event.type === "submit" && event.target.dataset.form === "entity") {
         event.preventDefault();
         var elForm = event.target, data = Object.fromEntries(new FormData(elForm));
-        await PYL.app.run(async function () { await s.saveEntity(resource, data, elForm.dataset.id || null); PYL.ui.closeModal(); PYL.app.refresh(); PYL.ui.toast("Registro guardado."); });
+        var entityName = { categorias: "categoria", clientes: "cliente", proveedores: "proveedor" }[resource];
+        await PYL.app.run(async function () { await s.saveEntity(resource, data, elForm.dataset.id || null); PYL.ui.closeModal(); PYL.app.refresh(); PYL.ui.toast("Registro guardado."); }, (elForm.dataset.id ? "Actualizando " : "Guardando ") + entityName + "...");
       }
       if (event.type !== "click") return;
       var el = event.target.closest("[data-action]"); if (!el) return;

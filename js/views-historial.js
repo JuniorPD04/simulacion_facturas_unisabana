@@ -60,7 +60,7 @@
           c.lines(sale.items, "precio") + payInfo +
           '<p class="detail-total">Total: ' + u.formatCurrency(sale.total) + '</p><div class="row-actions">' + actions(sale) + '</div>' });
       }
-      if (el.dataset.action === "resume-sale") await PYL.app.run(async function () { await s.resumeDraft(el.dataset.id); PYL.ui.closeModal(); location.hash = "#venta"; PYL.ui.toast("Venta retomada."); });
+      if (el.dataset.action === "resume-sale") await PYL.app.run(async function () { await s.resumeDraft(el.dataset.id); PYL.ui.closeModal(); location.hash = "#venta"; PYL.ui.toast("Venta retomada."); }, "Retomando venta...");
       if (el.dataset.action === "delete-sale") await c.remove("ventas", el.dataset.id);
     }
   };

@@ -83,11 +83,11 @@
       if (action === "clear-sale" && await PYL.ui.confirm({ title: "Limpiar ticket", message: "Se iniciara un ticket nuevo y vacio. Si esta venta ya estaba guardada en Ventas, esa version no se modifica.", confirmLabel: "Limpiar" })) { s.clearSale(); ticket(); }
       if (action === "start-pay") { if (!sale.items.length) throw new Error("Agrega al menos un producto."); s.setSaleField("paso", "pago"); ticket(); }
       if (action === "back-items") { s.setSaleField("paso", "items"); ticket(); }
-      if (action === "save-sale") await PYL.app.run(async function () { await s.saveDraft(); PYL.app.refresh(); PYL.ui.toast("Venta abierta guardada."); });
+      if (action === "save-sale") await PYL.app.run(async function () { await s.saveDraft(); PYL.app.refresh(); PYL.ui.toast("Venta abierta guardada."); }, "Guardando venta abierta...");
       if (action === "confirm-sale") await PYL.app.run(async function () {
         var result = await s.closeSale(); pane = "catalog"; location.hash = "#confirmacion/" + result.record.id;
         PYL.ui.toast(result.warning || "Venta registrada.", result.warning ? "error" : "ok");
-      });
+      }, "Registrando venta...");
     }
   };
 })(window);

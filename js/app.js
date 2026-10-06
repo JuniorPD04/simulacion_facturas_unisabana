@@ -14,29 +14,33 @@
     });
     if (!ready) {
       mount.innerHTML = '<section class="connection-state"><h2>' + (loadError ? "Datos no disponibles" : "Cargando datos...") + '</h2>' +
-        (loadError ? '<p role="alert">' + PYL.utils.escapeHtml(loadError) + '</p><button class="button button--primary" data-action="reload-data">Reintentar</button>' : '<progress aria-label="Cargando datos"></progress>') + '</section>';
+        (loadError ? '<p role="alert">' + PYL.utils.escapeHtml(loadError) + '</p><button class="button button--primary" data-action="reload-data">Reintentar</button>' : '') + '</section>';
       return;
     }
     var view = PYL.views[r.name];
-    mount.innerHTML = '<div class="sync-bar no-print"><button class="button button--ghost" data-action="reload-data" title="Actualizar datos">Actualizar datos</button><span id="sync-status" role="status"></span></div>' + view.render(r.id);
+    mount.innerHTML = '<div class="sync-bar no-print"><button class="button button--ghost" data-action="reload-data" title="Actualizar datos">Actualizar datos</button></div>' + view.render(r.id);
     if (view.afterRender) view.afterRender(r.id);
   }
-  async function run(fn) {
+  async function run(fn, message) {
     if (pending) return;
     pending = true;
     var controls = Array.from(document.querySelectorAll("#view button, #view input, #view select, #modal-root button, #modal-root input, #modal-root select"));
     var flags = controls.map(function (el) { return el.disabled; });
+    var roots = [document.querySelector(".shell"), document.getElementById("modal-root")];
+    var inertFlags = roots.map(function (el) { return el.inert; });
+    var focused = document.activeElement;
     controls.forEach(function (el) { el.disabled = true; });
+    roots.forEach(function (el) { el.inert = true; });
     document.getElementById("view").setAttribute("aria-busy", "true");
-    var status = document.getElementById("sync-status");
-    if (status) status.textContent = "Guardando...";
+    PYL.ui.showLoading(message);
     try { return await fn(); }
     finally {
       pending = false;
       controls.forEach(function (el, i) { if (el.isConnected) el.disabled = flags[i]; });
+      roots.forEach(function (el, i) { el.inert = inertFlags[i]; });
       document.getElementById("view").setAttribute("aria-busy", "false");
-      status = document.getElementById("sync-status");
-      if (status) status.textContent = "";
+      PYL.ui.hideLoading();
+      if (focused && focused.isConnected && !focused.disabled) focused.focus({ preventScroll: true });
     }
   }
   async function load() {
@@ -50,8 +54,8 @@
     if (pending) { if (event.type === "submit") event.preventDefault(); return; }
     try {
       if (event.type === "click" && event.target.closest('[data-action="reload-data"]')) {
-        if (!ready) await run(load);
-        else await run(async function () { await PYL.store.reload(); render(); PYL.ui.toast("Datos actualizados."); });
+        if (!ready) await run(load, "Cargando datos...");
+        else await run(async function () { await PYL.store.reload(); render(); PYL.ui.toast("Datos actualizados."); }, "Actualizando datos...");
         return;
       }
       if (!ready) return;
@@ -78,7 +82,7 @@
       window.addEventListener("beforeunload", function (event) {
         if (pending || (ready && PYL.store.getCurrentSale().items.length)) { event.preventDefault(); event.returnValue = ""; }
       });
-      await load();
+      await run(load, "Cargando datos...");
     }
   };
   document.addEventListener("DOMContentLoaded", PYL.app.start);

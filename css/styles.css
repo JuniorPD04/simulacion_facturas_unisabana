@@ -1049,6 +1049,50 @@ th {
   background: var(--danger);
 }
 
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(21, 35, 58, 0.28);
+  cursor: progress;
+}
+
+.loading-overlay[hidden] { display: none; }
+
+.loading-content {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: min(100%, 340px);
+  padding: 24px;
+  background: var(--white);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.loading-content p { margin: 0; overflow-wrap: anywhere; font-weight: 600; }
+
+.loading-spinner {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--line);
+  border-top-color: var(--ok);
+  border-radius: 50%;
+  animation: loading-spin 0.8s linear infinite;
+}
+
+@keyframes loading-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner { animation: none; }
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1505,9 +1549,26 @@ button:disabled { cursor: wait; opacity: 0.6; }
 .entity-row span { color: var(--muted); font-size: 0.85rem; }
 .entity-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 4px; background: #e6ebe8; max-width: 540px; }
 .entity-tabs .is-active { box-shadow: none; background: #fff; color: #225940; }
-.purchase-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; margin: 20px 0; }
+.purchase-picker { display: grid; gap: 8px; margin: 20px 0; min-width: 0; }
+.purchase-product-results { list-style: none; padding: 0; margin: 0; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--line); }
+.purchase-product-result { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+.purchase-product-result strong, .purchase-product-result span, .purchase-line-name strong, .purchase-line-name span { display: block; overflow-wrap: anywhere; }
+.purchase-product-result span, .purchase-line-name span { color: var(--muted); font-size: 0.8rem; margin-top: 3px; }
+.purchase-product-result .purchase-product-added { color: var(--ok); }
+.purchase-product-result [hidden] { display: none; }
+.purchase-product-result .button { width: 88px; }
+.purchase-lines-heading { margin: 16px 0 0; font-size: 1rem; }
+.modal--purchase { display: flex; flex-direction: column; height: min(860px, 88dvh); overflow: hidden; }
+.modal--purchase .modal__head { flex: none; }
+.modal--purchase .modal__body, .modal--purchase [data-form="purchase"] { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.purchase-form-content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px; flex: 1; }
+.purchase-form-footer { flex: none; padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--line); background: var(--white); }
+.purchase-form-footer .detail-total { margin: 0; padding-top: 0; }
+.purchase-form-footer .error { margin: 8px 0 0; }
+.purchase-form-footer .error:empty { display: none; }
+.purchase-form-footer .modal__actions { margin-top: 12px; flex-wrap: wrap; }
 .purchase-line { display: grid; grid-template-columns: minmax(0, 1fr) 100px 130px 40px; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
-.purchase-line > strong { overflow-wrap: anywhere; }
+.purchase-line-name { min-width: 0; }
 .detail-total { padding-top: 16px; font-weight: 700; text-align: right; }
 #ticket-count { display: inline-block; min-width: 1.5em; font-size: 0.85rem; color: var(--muted); }
 .field { min-width: 0; }
@@ -1529,7 +1590,7 @@ button:disabled { cursor: wait; opacity: 0.6; }
   .nav nav a { font-size: 0.72rem; }
   .sync-bar { justify-content: flex-start; flex-wrap: wrap; }
   .purchase-line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
-  .purchase-line > strong { grid-column: 1 / -1; }
+  .purchase-line-name { grid-column: 1 / -1; }
   .purchase-line .icon-btn { width: 32px; height: 32px; }
   .product-card__meta { display: none; }
   .modal-backdrop { padding: 10px; }
