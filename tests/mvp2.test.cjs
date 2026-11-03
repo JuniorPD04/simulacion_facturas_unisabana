@@ -166,18 +166,23 @@ test("migracion convierte categorias e items sin descontar otra vez las ventas M
   assert.equal(backend.get("categorias").data[0].nombre, "Arte");
 });
 
-test("cliente API usa fetch JSON, text/plain y propaga errores", async () => {
+test("cliente API usa rutas Django, JSON, metodos HTTP y propaga errores", async () => {
   const requests = [];
   let response = { success: true, data: [] };
   const context = vm.createContext({ window: {}, URL, fetch: async (url, options) => {
     requests.push({ url, options }); return { ok: true, json: async () => response };
   } });
-  vm.runInContext(fs.readFileSync(root + "/js/api.js", "utf8").replace(/var API_URL = "[^"]*";/, 'var API_URL = "https://example.com/exec";'), context);
+  vm.runInContext(fs.readFileSync(root + "/js/api.js", "utf8"), context);
   const api = context.window.PYL.api;
   await api.apiGet("productos"); await api.apiPost("clientes", "create", { id: "1", nombre: "Test" });
-  assert.equal(new URL(requests[0].url).hostname, "example.com");
-  assert.equal(requests[1].options.headers["Content-Type"], "text/plain;charset=utf-8");
-  assert.equal(JSON.parse(requests[1].options.body).action, "create");
+  assert.equal(requests[0].url, "/api/productos/");
+  assert.equal(requests[1].options.headers["Content-Type"], "application/json");
+  assert.equal(JSON.parse(requests[1].options.body).nombre, "Test");
+  await api.apiPost("clientes", "update", { id: "1", nombre: "Editado" });
+  assert.equal(requests[2].url, "/api/clientes/1/");
+  assert.equal(requests[2].options.method, "PATCH");
+  await api.apiPost("clientes", "delete", { id: "1" });
+  assert.equal(requests[3].options.method, "DELETE");
   response = { success: false, message: "Rechazado" };
   await assert.rejects(api.apiGet("productos"), /Rechazado/);
 });

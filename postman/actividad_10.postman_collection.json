@@ -1,0 +1,812 @@
+{
+  "info": {
+    "name": "Papel y Luna - Actividad 10",
+    "description": "API local Django/PostgreSQL 18. Ejecutar en orden. Crea datos de demostración y documentos contables que se conservan; usar una base de pruebas.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8000"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Salud PostgreSQL 18",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/health/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"PostgreSQL 18\", () => pm.expect(result.data.version).to.match(/^18\\./));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 GET productos sin campos _id",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/productos/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "function check(value) { if (Array.isArray(value)) value.forEach(check); else if (value && typeof value === \"object\") Object.entries(value).forEach(([k,v]) => { pm.expect(k.endsWith(\"_id\")).to.equal(false); check(v); }); }",
+              "pm.test(\"Sanitizacion recursiva\", () => check(result));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Crear categoria",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/categorias/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"Postman {{runId}}\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"runId\", pm.variables.replaceIn(\"{{$guid}}\"));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.collectionVariables.set(\"categoryId\", result.data.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Validator campo faltante",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/clientes/",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();",
+              "pm.test(\"Error por campo\", () => pm.expect(result.errors).to.have.property(\"nombre\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Validator tipo incorrecto",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/clientes/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": 123}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Validator correo",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/clientes/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"Ana\", \"correo\": \"invalido\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Crear producto",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/productos/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"Cuaderno Postman\", \"codigo\": \"PM-{{runId}}\", \"categoriaId\": \"{{categoryId}}\", \"precio\": 1000, \"costo\": 500, \"stock\": 10, \"seguimientoInventario\": true}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.collectionVariables.set(\"productId\", result.data.id);",
+              "pm.test(\"Relacion publica conservada\", () => pm.expect(result.data.categoriaId).to.equal(pm.collectionVariables.get(\"categoryId\")));",
+              "pm.test(\"Relacion interna eliminada\", () => pm.expect(result.data).not.to.have.property(\"categoria_id\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 PUT invalido",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/productos/{{productId}}/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"Cuaderno Postman\", \"codigo\": \"PM-{{runId}}\", \"categoriaId\": \"{{categoryId}}\", \"precio\": true, \"costo\": 500, \"stock\": 10, \"seguimientoInventario\": true}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 PUT valido",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/productos/{{productId}}/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"Cuaderno Postman\", \"codigo\": \"PM-{{runId}}\", \"categoriaId\": \"{{categoryId}}\", \"precio\": 1000, \"costo\": 500, \"stock\": 10, \"seguimientoInventario\": true}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Crear proveedor",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/proveedores/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"Proveedor {{runId}}\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.collectionVariables.set(\"providerId\", result.data.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 Venta abierta",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/ventas/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"fecha\": \"{{saleDate}}\", \"estado\": \"abierta\", \"metodoPago\": \"Efectivo\", \"valorRecibido\": 5000, \"clienteId\": \"\", \"itemsJson\": \"[{\\\"productoId\\\": \\\"{{productId}}\\\", \\\"cantidad\\\": 2}]\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"saleDate\", new Date().toISOString());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.collectionVariables.set(\"saleId\", result.data.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12 Stock intacto en borrador",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/productos/{{productId}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Stock 10\", () => pm.expect(result.data.stock).to.equal(10));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13 PUT cerrar venta",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/ventas/{{saleId}}/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"fecha\": \"{{saleDate}}\", \"estado\": \"cerrada\", \"metodoPago\": \"Efectivo\", \"valorRecibido\": 5000, \"clienteId\": \"\", \"itemsJson\": \"[{\\\"productoId\\\": \\\"{{productId}}\\\", \\\"cantidad\\\": 2}]\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Total calculado en servidor\", () => pm.expect(result.data.total).to.equal(2000));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "14 Stock descontado",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/productos/{{productId}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Stock 8\", () => pm.expect(result.data.stock).to.equal(8));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "15 Reintentar mismo cierre",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/ventas/{{saleId}}/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"fecha\": \"{{saleDate}}\", \"estado\": \"cerrada\", \"metodoPago\": \"Efectivo\", \"valorRecibido\": 5000, \"clienteId\": \"\", \"itemsJson\": \"[{\\\"productoId\\\": \\\"{{productId}}\\\", \\\"cantidad\\\": 2}]\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16 Reintento no duplica descuento",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/productos/{{productId}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Stock sigue en 8\", () => pm.expect(result.data.stock).to.equal(8));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "17 Compra repone stock",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/compras/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"fecha\": \"{{purchaseDate}}\", \"proveedorId\": \"{{providerId}}\", \"itemsJson\": \"[{\\\"productoId\\\": \\\"{{productId}}\\\", \\\"cantidad\\\": 3, \\\"costo\\\": 600}]\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"purchaseDate\", new Date().toISOString().slice(0,10));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "18 Inventario tras compra",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/productos/{{productId}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Stock 11 y costo 600\", () => { pm.expect(result.data.stock).to.equal(11); pm.expect(result.data.costo).to.equal(600); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "19 Sanitizacion anidada",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/demo/sanitizacion/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Elimina *_id\", () => { pm.expect(result.data).not.to.have.property(\"cliente_id\"); pm.expect(result.data.nested).to.deep.equal({nombre:\"Papel y Luna\"}); pm.expect(result.data.items[0]).to.deep.equal({cantidad:2,productoId:\"publico\"}); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20 DELETE protege venta cerrada",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": "{{baseUrl}}/api/ventas/{{saleId}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "21 DELETE protege categoria referenciada",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": "{{baseUrl}}/api/categorias/{{categoryId}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "22 Crear cliente temporal",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/clientes/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"Temporal {{runId}}\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.collectionVariables.set(\"clientId\", result.data.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "23 PUT cliente invalido",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/clientes/{{clientId}}/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": false}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "24 PUT cliente valido",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/clientes/{{clientId}}/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"Editado\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "25 DELETE cliente",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": "{{baseUrl}}/api/clientes/{{clientId}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "26 GET confirma eliminacion",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/clientes/{{clientId}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "27 Logging registra GET POST PUT DELETE",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/request-logs/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Metodos registrados\", () => { const methods = result.data.map(row => row.method); [\"GET\",\"POST\",\"PUT\",\"DELETE\"].forEach(m => pm.expect(methods).to.include(m)); });",
+              "pm.test(\"Solicitud actual registrada antes del controlador\", () => pm.expect(result.data[0].path).to.equal(\"/api/request-logs/\"));",
+              "pm.test(\"Log incluye IP y fecha\", () => { pm.expect(result.data[0]).to.have.property(\"ip\"); pm.expect(result.data[0]).to.have.property(\"called_at\"); });"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

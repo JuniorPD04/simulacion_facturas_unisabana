@@ -9,13 +9,13 @@ const { createBackend, root } = require("./helpers.cjs");
   const backend = createBackend();
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
-    if (url.pathname === "/test-api") {
-      const resource = url.searchParams.get("resource");
+    if (url.pathname.startsWith("/api/")) {
+      const [, , resource, id] = url.pathname.split("/");
       if (req.method === "GET") { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify(backend.get(resource))); }
       else {
         let body = "";
         req.on("data", chunk => { body += chunk; });
-        req.on("end", () => { const b = JSON.parse(body); res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify(backend.post(resource, b.action, b.data))); });
+        req.on("end", () => { const b = body ? JSON.parse(body) : { id }; res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify(backend.post(resource, req.method === "DELETE" ? "delete" : req.method === "POST" ? "create" : "update", b))); });
       }
       return;
     }
@@ -24,10 +24,6 @@ const { createBackend, root } = require("./helpers.cjs");
     const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" };
     res.setHeader("Content-Type", types[path.extname(target)] || "application/octet-stream");
     let content = fs.readFileSync(target);
-    if (url.pathname === "/js/api.js") {
-      content = content.toString().replace(/var API_URL = "[^"]*";/, 'var API_URL = location.origin + "/test-api";');
-      assert.ok(content.includes('var API_URL = location.origin + "/test-api";'), "Browser tests must use the simulated service.");
-    }
     res.end(content);
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -43,7 +39,7 @@ const { createBackend, root } = require("./helpers.cjs");
       let release;
       const gate = new Promise(resolve => { release = resolve; });
       const handler = async route => { await gate; await route.continue(); };
-      await page.route("**/test-api?*", handler);
+      await page.route("**/api/**", handler);
       try {
         await action();
         await page.locator("#loading-root").waitFor({ state: "visible" });
@@ -62,7 +58,7 @@ const { createBackend, root } = require("./helpers.cjs");
       } finally {
         release();
         try { await page.locator("#loading-root").waitFor({ state: "hidden" }); }
-        finally { await page.unroute("**/test-api?*", handler); }
+        finally { await page.unroute("**/api/**", handler); }
       }
       assert.equal(await page.evaluate(() => PYL.app.isBusy() || document.querySelector(".shell").inert || document.getElementById("modal-root").inert), false);
       assert.equal(await page.locator("#view").getAttribute("aria-busy"), "false");
