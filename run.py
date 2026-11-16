@@ -5,15 +5,34 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import sysconfig
 import venv
 
 ROOT = Path(__file__).resolve().parent
+
+
+def reject_free_threaded_build():
+    # Las builds "free-threaded" (python3.13t) usan otro ABI (cp313t) y no
+    # tienen wheels de psycopg-binary; sin esto, pip falla con un error de
+    # resolucion de dependencias dificil de interpretar.
+    if sysconfig.get_config_var('Py_GIL_DISABLED'):
+        print(
+            'Este interprete de Python es una build "free-threaded" (su ejecutable suele llamarse '
+            'python3.13t) y no tiene wheels de psycopg-binary disponibles: la instalacion fallaria. '
+            'Vuelve a ejecutar con una build estandar de Python 3.12 o 3.13, por ejemplo:\n'
+            '  py -3.12 run.py\n'
+            '  py -3.13 run.py\n'
+            'Usa "py -0p" para listar tus instalaciones de Python.',
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 def bootstrap():
     executable = ROOT / '.venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
     if Path(sys.prefix).resolve() != (ROOT / '.venv').resolve():
         if not executable.exists():
+            reject_free_threaded_build()
             print('Creando entorno virtual...', flush=True)
             venv.create(ROOT / '.venv', with_pip=True)
         return subprocess.call([str(executable), str(Path(__file__).resolve()), *sys.argv[1:]], cwd=ROOT)

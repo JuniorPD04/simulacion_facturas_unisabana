@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $destination = Join-Path $projectRoot 'papel-y-luna-django-postgresql18.zip'
-$relativePaths = @('index.html', 'js', 'css', 'assets', 'README.md', 'apps-script.gs', 'tests', 'scripts', 'backend', 'facturacion', 'sql', 'postman', 'docs', 'requirements.txt', 'requirements.lock.txt', 'run.py', 'manage.py', '.env.example')
+$relativePaths = @('index.html', 'js', 'css', 'assets', 'README.md', 'apps-script.gs', 'tests', 'scripts', 'backend', 'facturacion', 'sql', 'postman', 'docs', 'requirements.txt', 'requirements.lock.txt', 'run.py', 'manage.py', '.env.example', 'Procfile', 'render.yaml', '.python-version')
 $staging = Join-Path ([IO.Path]::GetTempPath()) ('papel-luna-package-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $staging | Out-Null
 try {

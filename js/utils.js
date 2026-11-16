@@ -96,6 +96,10 @@
     return '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M7 3.5h7.2L19 8.2V20.5H7z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M14.2 3.5V8H19M9.4 12h5.2M9.4 15.4h5.2"/></svg>';
   }
 
+  function iconRefund() {
+    return '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M6 8H3.5V5.5M3.8 8.2A8 8 0 1 1 3 13"/></svg>';
+  }
+
   PYL.utils = {
     escapeHtml: escapeHtml,
     formatCurrency: formatCurrency,
@@ -111,6 +115,7 @@
     iconTrash: iconTrash,
     iconPlay: iconPlay,
     iconEye: iconEye,
-    iconInvoice: iconInvoice
+    iconInvoice: iconInvoice,
+    iconRefund: iconRefund
   };
 })(window);

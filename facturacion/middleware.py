@@ -3,6 +3,7 @@ import json
 import logging
 from django.http import JsonResponse
 from django.db import DatabaseError
+from . import accounts
 from .models import RequestLog
 
 logger = logging.getLogger('facturacion.requests')
@@ -13,15 +14,24 @@ class RequestLoggingMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
 
+    @staticmethod
+    def _bearer_token(request):
+        parts = request.META.get('HTTP_AUTHORIZATION', '').split()
+        return parts[1] if len(parts) == 2 and parts[0] == 'Bearer' else None
+
     def __call__(self, request):
         ip = request.META.get('REMOTE_ADDR')
         try:
             ip = str(ipaddress.ip_address(ip))
         except ValueError:
             ip = None
-        logger.info('%s %s ip=%s', request.method, request.path, ip)
+        # Lectura best-effort: no falla ni bloquea si el token es invalido o
+        # vencido, simplemente se registra sin usuario (igual que hoy sin token).
+        session = accounts.lookup_session(self._bearer_token(request))
+        usuario = session.usuario if session else None
+        logger.info('%s %s ip=%s usuario=%s', request.method, request.path, ip, usuario and usuario.usuario)
         try:
-            RequestLog.objects.create(method=request.method, path=request.path[:255], ip=ip)
+            RequestLog.objects.create(method=request.method, path=request.path[:255], ip=ip, usuario=usuario)
         except DatabaseError:
             logger.exception('No se pudo registrar la solicitud')
             return JsonResponse({'success': False, 'message': 'Base de datos no disponible.'}, status=503)

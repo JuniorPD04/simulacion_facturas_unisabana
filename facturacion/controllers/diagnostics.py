@@ -1,10 +1,14 @@
 from django.db import connection
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from facturacion.auth import IsAdminRole
 from facturacion.models import RequestLog
 
 
 class HealthController(APIView):
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
         with connection.cursor() as cursor:
             cursor.execute('SHOW server_version')
@@ -13,12 +17,21 @@ class HealthController(APIView):
 
 
 class RequestLogsController(APIView):
+    # Expone IP y rutas de todas las solicitudes: solo administrador.
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
     def get(self, request):
-        rows = list(RequestLog.objects.order_by('-id').values()[:100])
+        # values() expondria "usuario_id"; el middleware de sanitizacion
+        # elimina cualquier clave *_id, asi que se arma a mano con el nombre.
+        rows = [{'id': row.id, 'method': row.method, 'path': row.path, 'ip': row.ip,
+                 'usuario': row.usuario.usuario if row.usuario_id else None, 'called_at': row.called_at}
+                for row in RequestLog.objects.select_related('usuario').order_by('-id')[:100]]
         return Response({'success': True, 'data': rows})
 
 
 class SanitizationDemoController(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
     def get(self, request):
         # La respuesta del controlador contiene *_id; el middleware los elimina.
         return Response({'success': True, 'data': {'id': 'demo', 'cliente_id': 42,

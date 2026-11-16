@@ -2,10 +2,14 @@
   var PYL = global.PYL, u = PYL.utils, s = PYL.store, c = PYL.components;
   var resource = "categorias", search = "";
   var titles = { categorias: "Categorias", clientes: "Clientes", proveedores: "Proveedores" };
+  // Ambos roles administran clientes; categorias y proveedores son de administrador
+  // (el cajero solo necesita consultar categorias para el flujo de venta).
+  function canManage() { return resource === "clientes" || PYL.auth.isAdmin(); }
   function rows() {
     var list = s.list(resource).filter(function (row) { return (row.nombre + " " + (row.telefono || "") + " " + (row.correo || "")).toLowerCase().includes(search.toLowerCase()); });
+    var manage = canManage();
     document.getElementById("entities-list").innerHTML = list.length ? list.map(function (row) {
-      return '<div class="entity-row"><div><strong>' + u.escapeHtml(row.nombre) + '</strong>' + (resource === "categorias" ? "" : '<p>' + u.escapeHtml(row.telefono || "") + '</p><span>' + u.escapeHtml(row.correo || "") + '</span>') + '</div><div class="row-actions">' + c.icon("edit-entity", row.id, "Editar " + row.nombre, u.iconPencil()) + c.icon("delete-entity", row.id, "Eliminar " + row.nombre, u.iconTrash(), true) + '</div></div>';
+      return '<div class="entity-row"><div><strong>' + u.escapeHtml(row.nombre) + '</strong>' + (resource === "categorias" ? "" : '<p>' + u.escapeHtml(row.telefono || "") + '</p><span>' + u.escapeHtml(row.correo || "") + '</span>') + '</div><div class="row-actions">' + (manage ? c.icon("edit-entity", row.id, "Editar " + row.nombre, u.iconPencil()) + c.icon("delete-entity", row.id, "Eliminar " + row.nombre, u.iconTrash(), true) : "") + '</div></div>';
     }).join("") : '<p class="empty-note">No hay registros con ese criterio.</p>';
   }
   function form(id) {
@@ -18,9 +22,12 @@
   }
   PYL.views.entidades = {
     render: function () {
-      return '<section class="stack"><h2>Entidades</h2><div class="entity-tabs" role="tablist" aria-label="Entidades">' + Object.keys(titles).map(function (r) {
+      if (resource === "proveedores" && !PYL.auth.isAdmin()) resource = "clientes";
+      return '<section class="stack"><h2>Entidades</h2><div class="entity-tabs" role="tablist" aria-label="Entidades">' + Object.keys(titles).filter(function (r) {
+        return r !== "proveedores" || PYL.auth.isAdmin();
+      }).map(function (r) {
         return '<button class="sale-tab' + (resource === r ? " is-active" : "") + '" role="tab" aria-selected="' + (resource === r) + '" data-action="entity-tab" data-resource="' + r + '">' + titles[r] + '</button>';
-      }).join("") + '</div><div class="panel-head"><h3>' + titles[resource] + '</h3><button class="button button--primary" data-action="new-entity">Nuevo registro</button></div><label class="search">Buscar<input id="entity-search" type="search" value="' + u.escapeHtml(search) + '" placeholder="Nombre o contacto"></label><div id="entities-list" class="stack"></div></section>';
+      }).join("") + '</div><div class="panel-head"><h3>' + titles[resource] + '</h3>' + (canManage() ? '<button class="button button--primary" data-action="new-entity">Nuevo registro</button>' : "") + '</div><label class="search">Buscar<input id="entity-search" type="search" value="' + u.escapeHtml(search) + '" placeholder="Nombre o contacto"></label><div id="entities-list" class="stack"></div></section>';
     },
     afterRender: rows,
     handle: async function (event) {

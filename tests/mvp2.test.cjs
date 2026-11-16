@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const { createBackend, createStore, seed, root } = require("./helpers.cjs");
+const { createBackend, createStore, createDiscountStore, seed, root } = require("./helpers.cjs");
 
 test("hojas vacias, CRUD parcial, ids inexistentes y referencias", async () => {
   const backend = createBackend(), { store } = createStore(backend);
@@ -170,9 +170,9 @@ test("cliente API usa rutas Django, JSON, metodos HTTP y propaga errores", async
   const requests = [];
   let response = { success: true, data: [] };
   const context = vm.createContext({ window: {}, URL, fetch: async (url, options) => {
-    requests.push({ url, options }); return { ok: true, json: async () => response };
+    requests.push({ url, options }); return { ok: true, status: 200, json: async () => response };
   } });
-  vm.runInContext(fs.readFileSync(root + "/js/api.js", "utf8"), context);
+  for (const file of ["config.js", "auth.js", "api.js"]) vm.runInContext(fs.readFileSync(root + "/js/" + file, "utf8"), context);
   const api = context.window.PYL.api;
   await api.apiGet("productos"); await api.apiPost("clientes", "create", { id: "1", nombre: "Test" });
   assert.equal(requests[0].url, "/api/productos/");
@@ -185,6 +185,30 @@ test("cliente API usa rutas Django, JSON, metodos HTTP y propaga errores", async
   assert.equal(requests[3].options.method, "DELETE");
   response = { success: false, message: "Rechazado" };
   await assert.rejects(api.apiGet("productos"), /Rechazado/);
+});
+
+test("los errores de validacion se muestran como frase legible, sin llaves ni comillas", async () => {
+  let response;
+  const context = vm.createContext({ window: {}, URL, console, fetch: async () => ({ ok: false, status: 400, json: async () => response }) });
+  for (const file of ["config.js", "auth.js", "api.js"]) vm.runInContext(fs.readFileSync(root + "/js/" + file, "utf8"), context);
+  const api = context.window.PYL.api;
+  response = { success: false, message: "Datos invalidos.", errors: { stock: "Stock insuficiente para Cuaderno cuadriculado. Disponible: 995" } };
+  await assert.rejects(api.apiGet("productos"), (error) => {
+    assert.equal(error.message, "Stock insuficiente para Cuaderno cuadriculado. Disponible: 995");
+    assert.ok(!error.message.includes("{") && !error.message.includes("\""));
+    return true;
+  });
+  // Varios campos (incluida la forma anidada de itemsJson por item): se unen en una sola frase.
+  response = { success: false, message: "Datos invalidos.", errors: { nombre: ["Este campo es obligatorio."], itemsJson: [{}, { cantidad: "Debe ser mayor a 0." }] } };
+  await assert.rejects(api.apiGet("productos"), (error) => {
+    assert.ok(error.message.includes("Este campo es obligatorio."));
+    assert.ok(error.message.includes("Debe ser mayor a 0."));
+    assert.ok(!error.message.includes("{") && !error.message.includes("\""));
+    return true;
+  });
+  // Sin errors (p. ej. 409 de Conflict): usa el mensaje general.
+  response = { success: false, message: "No se pueden modificar documentos ya contabilizados." };
+  await assert.rejects(api.apiGet("productos"), /No se pueden modificar documentos ya contabilizados\./);
 });
 
 test("precio, costo y valor recibido deben ser enteros; cualquier entero valido se acepta", async () => {
@@ -225,4 +249,151 @@ test("escribir() aplica formato de texto a las celdas con string antes de guarda
   assert.equal(backend.format("productos", 2, 1), "@"); // id
   assert.equal(backend.format("productos", 2, 2), "@"); // codigo
   assert.notEqual(backend.format("productos", 2, 5), "@"); // precio, numerico
+});
+
+test("formula de descuento: porcentual redondea hacia abajo, fijo es el valor, sin descuento es 0", async () => {
+  const { store } = createDiscountStore();
+  assert.equal(store.discountAmount(999, { tipo: "porcentual", valor: 10 }), 99); // floor(99.9)
+  assert.equal(store.discountAmount(1000, { tipo: "porcentual", valor: 10 }), 100);
+  assert.equal(store.discountAmount(1000, { tipo: "fijo", valor: 300 }), 300);
+  assert.equal(store.discountAmount(1000, null), 0);
+});
+
+test("ticket con descuento: aplicar, reemplazar, quitar y bloquear cobro si el fijo supera el subtotal", async () => {
+  const { store } = createDiscountStore();
+  await store.init();
+  store.addItem("product", 1); // subtotal 1000
+  assert.equal(store.getAppliedDiscount(), null);
+  assert.equal(store.applyDiscount("d10"), null); // nada que reemplazar la primera vez
+  assert.equal(store.currentDiscountAmount(), 100);
+  assert.equal(store.currentNetTotal(), 900);
+  assert.equal(store.discountInvalid(), false);
+
+  const replaced = store.applyDiscount("dfijo");
+  assert.equal(replaced, "10%");
+  assert.equal(store.currentDiscountAmount(), 300);
+  assert.equal(store.currentNetTotal(), 700);
+
+  store.removeDiscount();
+  assert.equal(store.getAppliedDiscount(), null);
+  assert.equal(store.currentNetTotal(), 1000);
+
+  // Fijo de 300 contra un subtotal de 100 (producto barato): invalido.
+  store.removeItem("product");
+  store.addItem("barato", 1);
+  store.applyDiscount("dfijo");
+  assert.equal(store.discountInvalid(), true);
+  await assert.rejects(store.closeSale(), /supera el subtotal/);
+  await assert.rejects(store.saveDraft(), /supera el subtotal/);
+});
+
+test("ticket sin descuento nunca manda descuentoId; al quitar uno ya guardado, lo manda vacio para limpiarlo", async () => {
+  const { store, calls } = createDiscountStore();
+  await store.init();
+  store.addItem("product", 1);
+  store.setSaleField("metodoPago", "Nequi");
+  const opened = await store.saveDraft();
+  assert.equal("descuentoId" in calls.at(-1).data, false);
+
+  await store.resumeDraft(opened.record.id);
+  store.applyDiscount("d10");
+  await store.saveDraft();
+  assert.equal(calls.at(-1).data.descuentoId, "d10");
+
+  await store.resumeDraft(opened.record.id);
+  store.removeDiscount();
+  await store.saveDraft();
+  assert.equal(calls.at(-1).data.descuentoId, "");
+});
+
+test("modo correccion: no pisa un ticket en curso, calcula totales propios y se puede cancelar sin perder nada", async () => {
+  const { store } = createDiscountStore();
+  await store.init();
+  store.addItem("product", 2);
+  store.setSaleField("metodoPago", "Nequi");
+  const closed = await store.closeSale();
+
+  store.addItem("barato", 1); // ticket NUEVO en curso, antes de entrar a corregir
+  assert.equal(store.getCurrentSale().items.length, 1);
+
+  store.startCorrection(closed.record.id);
+  assert.equal(store.isCorrecting(), true);
+  assert.equal(store.getCurrentSale().items.length, 1, "el ticket en curso no debe tocarse al entrar a corregir");
+  assert.equal(store.getCorrection().items.length, 1);
+  assert.equal(store.correctionSubtotal(), 2000);
+
+  store.correctionUpdateItemQty("product", 4);
+  assert.equal(store.correctionSubtotal(), 4000);
+  store.correctionAddItem("barato", 2);
+  assert.equal(store.correctionSubtotal(), 4200);
+  store.correctionRemoveItem("barato");
+  assert.equal(store.correctionSubtotal(), 4000);
+
+  store.cancelCorrection();
+  assert.equal(store.isCorrecting(), false);
+  assert.equal(store.getCurrentSale().items.length, 1, "el ticket en curso sigue intacto tras cancelar");
+  assert.equal(store.getCurrentSale().items[0].productoId, "barato");
+});
+
+test("alta rapida de cliente (RF-23) no pierde el ticket en curso", async () => {
+  const { store } = createDiscountStore();
+  await store.init();
+  store.addItem("product", 1);
+  const client = await store.saveEntity("clientes", { nombre: "Cliente rapido" }, null);
+  store.setSaleField("clienteId", client.id);
+  assert.equal(store.getCurrentSale().items.length, 1, "el ticket no debe perderse al crear el cliente");
+  assert.equal(store.getCurrentSale().clienteId, client.id);
+});
+
+test("reembolso: vista previa, 'reembolsar todo', cantidades acotadas y UUID generado/reutilizado", async () => {
+  const { store } = createDiscountStore();
+  await store.init();
+  store.addItem("product", 3); // precio 1000
+  store.addItem("barato", 2); // precio 100
+  store.setSaleField("metodoPago", "Nequi");
+  const closed = await store.closeSale(); // sin descuento: subtotal === total, razon 1:1
+
+  store.startRefund(closed.record.id);
+  assert.equal(store.isRefunding(), true);
+  var refund = store.getRefund();
+  assert.equal(refund.lines.length, 2);
+  var productLine = refund.lines.find((l) => l.productoId === "product");
+  var baratoLine = refund.lines.find((l) => l.productoId === "barato");
+  assert.equal(productLine.vendido, 3);
+  assert.equal(productLine.yaReembolsado, 0);
+  assert.equal(productLine.disponible, 3);
+  assert.equal(productLine.cantidad, 0);
+  assert.equal(productLine.retornaInventario, true);
+
+  // Cantidades acotadas: no se puede pedir mas de lo disponible, ni negativo.
+  store.refundSetLineQty("product", 999);
+  assert.equal(store.getRefund().lines.find((l) => l.productoId === "product").cantidad, 3);
+  assert.throws(() => store.refundSetLineQty("product", -1), /entero no negativo/);
+
+  // Vista previa: sin descuento, razon 1:1, el monto es exactamente precio*cantidad.
+  store.refundSetLineQty("product", 2);
+  assert.equal(store.refundPreviewTotal(), 2000);
+  store.refundSetLineQty("barato", 1);
+  assert.equal(store.refundPreviewTotal(), 2100);
+
+  // "Reembolsar todo" llena cada linea hasta lo disponible.
+  store.refundFillAll();
+  refund = store.getRefund();
+  assert.equal(refund.lines.find((l) => l.productoId === "product").cantidad, 3);
+  assert.equal(refund.lines.find((l) => l.productoId === "barato").cantidad, 2);
+  assert.equal(store.refundPreviewTotal(), 3200); // 3*1000 + 2*100
+
+  // El UUID se genera una vez al abrir y se mantiene igual mientras se edita
+  // (reintentos del mismo envio reutilizan el mismo id).
+  var firstId = store.getRefund().id;
+  assert.match(firstId, /^[0-9a-f-]{36}$/i);
+  store.refundSetLineQty("product", 1);
+  assert.equal(store.getRefund().id, firstId, "editar cantidades no debe cambiar el id del reembolso en curso");
+
+  // Cancelar y volver a abrir genera un intento (y un UUID) nuevo.
+  store.cancelRefund();
+  assert.equal(store.isRefunding(), false);
+  store.startRefund(closed.record.id);
+  assert.notEqual(store.getRefund().id, firstId, "un nuevo intento debe tener un UUID distinto");
+  assert.equal(store.getRefund().lines.find((l) => l.productoId === "product").cantidad, 0, "el nuevo intento empieza sin seleccion previa");
 });

@@ -7,12 +7,14 @@ const assert = require('node:assert/strict');
 const base = process.env.TEST_API_URL;
 if (!base) throw new Error('Define TEST_API_URL apuntando a un servicio con base de pruebas.');
 const context = vm.createContext({window: {}, crypto, console, fetch: (url, options) => fetch(new URL(url, base), options)});
-for (const file of ['config.js', 'api.js', 'store.js']) {
+for (const file of ['config.js', 'auth.js', 'api.js', 'store.js']) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../js', file), 'utf8'), context);
 }
 
 (async () => {
-  const {store, api} = context.window.PYL;
+  const {store, api, auth} = context.window.PYL;
+  // Usuario sembrado por "manage.py seed" (ver SEED_ADMIN_USER/SEED_ADMIN_PASSWORD en .env).
+  await auth.login(process.env.TEST_ADMIN_USER || 'admin', process.env.TEST_ADMIN_PASSWORD || 'admin123');
   await store.init();
   const category = await store.saveEntity('categorias', {nombre: 'Integracion ' + crypto.randomUUID()});
   const client = await store.saveEntity('clientes', {nombre: 'Cliente integración', correo: 'demo@example.com'});

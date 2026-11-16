@@ -3,12 +3,60 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const { createBackend, root } = require("./helpers.cjs");
 
 (async () => {
   const backend = createBackend();
+  // apps-script.gs (legado) no modela descuentos: CRUD minimo en memoria solo
+  // para que esta prueba de interfaz pueda ejercitar el modulo nuevo.
+  const discounts = [];
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
+    if (url.pathname.startsWith("/api/descuentos/")) {
+      const id = url.pathname.split("/")[3] || "";
+      if (req.method === "GET") { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ success: true, data: discounts })); return; }
+      let body = "";
+      req.on("data", chunk => { body += chunk; });
+      req.on("end", () => {
+        res.setHeader("Content-Type", "application/json");
+        if (req.method === "DELETE") {
+          const index = discounts.findIndex(d => d.id === id);
+          if (index >= 0) discounts.splice(index, 1);
+          res.end(JSON.stringify({ success: true, data: { id } }));
+          return;
+        }
+        const data = JSON.parse(body);
+        const record = { id: data.id || id || crypto.randomUUID(), nombre: data.nombre, tipo: data.tipo, valor: Number(data.valor) };
+        const existing = discounts.findIndex(d => d.id === record.id);
+        if (existing >= 0) discounts[existing] = Object.assign({}, discounts[existing], record);
+        else discounts.push(record);
+        res.end(JSON.stringify({ success: true, data: record }));
+      });
+      return;
+    }
+    if (url.pathname.startsWith("/api/auth/")) {
+      // Mock minimo: no valida credenciales ni token. La autenticacion real
+      // (login/logout/401/403 por rol) ya la cubre facturacion/tests.py
+      // (AuthTests); esto solo desbloquea la pantalla de login para probar
+      // el resto de la interfaz con Playwright, como administrador.
+      let body = "";
+      req.on("data", chunk => { body += chunk; });
+      req.on("end", () => {
+        res.setHeader("Content-Type", "application/json");
+        if (url.pathname === "/api/auth/login/" && req.method === "POST") {
+          const data = body ? JSON.parse(body) : {};
+          res.end(JSON.stringify({ success: true, data: { token: "test-token", usuario: { id: "test-admin", usuario: data.usuario || "admin", rol: "administrador" } } }));
+        } else if (url.pathname === "/api/auth/me/" && req.method === "GET") {
+          res.end(JSON.stringify({ success: true, data: { id: "test-admin", usuario: "admin", rol: "administrador" } }));
+        } else if (url.pathname === "/api/auth/logout/" && req.method === "POST") {
+          res.end(JSON.stringify({ success: true, data: {} }));
+        } else {
+          res.statusCode = 404; res.end(JSON.stringify({ success: false, message: "No encontrado." }));
+        }
+      });
+      return;
+    }
     if (url.pathname.startsWith("/api/")) {
       const [, , resource, id] = url.pathname.split("/");
       if (req.method === "GET") { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify(backend.get(resource))); }
@@ -63,7 +111,11 @@ const { createBackend, root } = require("./helpers.cjs");
       assert.equal(await page.evaluate(() => PYL.app.isBusy() || document.querySelector(".shell").inert || document.getElementById("modal-root").inert), false);
       assert.equal(await page.locator("#view").getAttribute("aria-busy"), "false");
     };
-    await loadingAction(() => page.goto(address), "Cargando datos...");
+    await page.goto(address);
+    await page.locator(".login-card").waitFor();
+    await page.getByLabel("Usuario", { exact: true }).fill("admin");
+    await page.getByLabel("Contrasena", { exact: true }).fill("admin123");
+    await loadingAction(() => page.getByRole("button", { name: "Entrar", exact: true }).click(), "Iniciando sesion...");
     await page.getByRole("heading", { name: "Nueva venta", exact: true }).waitFor();
     assert.match(await page.locator("#catalog-grid").innerText(), /No hay productos/);
     const nav = async name => { await page.locator("nav").getByRole("link", { name, exact: true }).click(); await page.waitForTimeout(60); };

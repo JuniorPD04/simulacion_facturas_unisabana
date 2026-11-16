@@ -55,15 +55,56 @@ function createBackend() {
 function createStore(backend, overrides = {}) {
   const calls = [];
   const context = vm.createContext({ window: {}, crypto: crypto.webcrypto, console });
-  context.window.PYL = { api: {
-    resources: ["productos", "ventas", "compras", "clientes", "proveedores", "categorias"],
-    async apiGet(resource) { const result = backend.get(resource); if (!result.success) throw new Error(result.message); return result.data; },
-    async apiPost(resource, action, data) { calls.push({ resource, action, data }); const result = backend.post(resource, action, data); if (!result.success) throw new Error(result.message); return result.data; },
-    ...overrides
-  } };
+  context.window.PYL = {
+    // Backend simulado de las entregas anteriores: no modela roles, asi que
+    // el store ve acceso total (equivalente a administrador).
+    auth: { isAdmin: () => true },
+    api: {
+      resources: ["productos", "ventas", "compras", "clientes", "proveedores", "categorias"],
+      async apiGet(resource) { const result = backend.get(resource); if (!result.success) throw new Error(result.message); return result.data; },
+      async apiPost(resource, action, data) { calls.push({ resource, action, data }); const result = backend.post(resource, action, data); if (!result.success) throw new Error(result.message); return result.data; },
+      ...overrides
+    }
+  };
   vm.runInContext(fs.readFileSync(path.join(root, "js/utils.js"), "utf8"), context);
   vm.runInContext(fs.readFileSync(path.join(root, "js/store.js"), "utf8"), context);
   return { store: context.window.PYL.store, api: context.window.PYL.api, calls };
+}
+// Descuentos no existen en el backend historico simulado (apps-script.gs, que
+// se conserva como referencia de una version anterior sin esa funcionalidad);
+// este helper aparte prueba la logica de store.js con un mock minimo propio.
+function createDiscountStore() {
+  const productos = [
+    { id: "product", codigo: "P-001", nombre: "Producto caro", categoriaId: "cat", precio: 1000, costo: 400, seguimientoInventario: true, stock: 10 },
+    { id: "barato", codigo: "P-002", nombre: "Producto barato", categoriaId: "cat", precio: 100, costo: 40, seguimientoInventario: true, stock: 10 }
+  ];
+  const descuentos = [
+    { id: "d10", nombre: "10%", tipo: "porcentual", valor: 10 },
+    { id: "dfijo", nombre: "Fijo 300", tipo: "fijo", valor: 300 }
+  ];
+  let ventas = [];
+  const calls = [];
+  const context = vm.createContext({ window: {}, crypto: crypto.webcrypto, console });
+  context.window.PYL = {
+    auth: { isAdmin: () => true },
+    api: {
+      resources: ["productos", "ventas", "compras", "clientes", "proveedores", "categorias", "descuentos"],
+      async apiGet(resource) {
+        if (resource === "productos") return productos;
+        if (resource === "descuentos") return descuentos;
+        if (resource === "ventas") return ventas;
+        return [];
+      },
+      async apiPost(resource, action, data) {
+        calls.push({ resource, action, data });
+        if (resource === "ventas" && action !== "delete") { ventas = ventas.filter(v => v.id !== data.id); ventas.push(Object.assign({}, data)); }
+        return data;
+      }
+    }
+  };
+  vm.runInContext(fs.readFileSync(path.join(root, "js/utils.js"), "utf8"), context);
+  vm.runInContext(fs.readFileSync(path.join(root, "js/store.js"), "utf8"), context);
+  return { store: context.window.PYL.store, calls };
 }
 function seed(backend) {
   const records = [
@@ -75,4 +116,4 @@ function seed(backend) {
   ];
   records.forEach(([r, data]) => { const result = backend.post(r, "create", data); if (!result.success) throw new Error(result.message); });
 }
-module.exports = { createBackend, createStore, seed, root };
+module.exports = { createBackend, createStore, createDiscountStore, seed, root };

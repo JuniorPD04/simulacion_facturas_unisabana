@@ -1,10 +1,14 @@
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from facturacion import services
+from facturacion.auth import ResourcePermission
 from facturacion.serializers import record_json
 
 
 class ResourceListController(APIView):
+    permission_classes = [IsAuthenticated, ResourcePermission]
+
     def get(self, request, resource):
         model, _ = services.resource_config(resource)
         records = model.objects.order_by('pk')
@@ -18,6 +22,8 @@ class ResourceListController(APIView):
 
 
 class ResourceDetailController(APIView):
+    permission_classes = [IsAuthenticated, ResourcePermission]
+
     def get(self, request, resource, pk):
         model, _ = services.resource_config(resource)
         return Response({'success': True, 'data': record_json(services.get_record(model, pk))})

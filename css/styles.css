@@ -114,6 +114,10 @@ a {
   box-shadow: inset 3px 0 0 var(--moon);
 }
 
+.nav nav a[hidden] {
+  display: none;
+}
+
 .team {
   margin-top: auto;
   display: grid;
@@ -300,6 +304,88 @@ a.icon-btn {
   color: #7a5a00;
   font-size: 0.78rem;
   font-weight: 700;
+}
+
+.pill--corrected {
+  min-height: 24px;
+  margin-left: 8px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.corrected-note {
+  color: var(--muted);
+  font-weight: 700;
+  margin: 4px 0;
+}
+
+.pill--refunded {
+  min-height: 24px;
+  margin-left: 8px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.refund-note {
+  margin: 8px 0;
+}
+
+.refund-note p {
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.refund-note ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+}
+
+.qty-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.qty-stepper input {
+  width: 56px;
+  text-align: center;
+}
+
+.refund-preview {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  font-size: 1.05rem;
+}
+
+.client-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.client-row .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.correction-banner {
+  background: var(--moon-soft);
+  color: #7a5a00;
+  border: 1px dashed var(--moon);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-weight: 800;
 }
 
 .toolbar {
@@ -539,6 +625,12 @@ select:focus,
   opacity: 0.62;
 }
 
+.product-card--discount {
+  grid-template-rows: auto;
+  border-style: dashed;
+  border-color: var(--moon);
+}
+
 .ticket {
   position: sticky;
   top: 16px;
@@ -610,6 +702,26 @@ select:focus,
 .totals dd {
   margin: 0;
   font-weight: 800;
+}
+
+.totals dd.is-bad {
+  color: var(--danger);
+}
+
+.totals__discount dt,
+.totals__discount dd {
+  color: var(--danger);
+}
+
+.totals__discount dd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.totals__discount .icon-btn {
+  width: 24px;
+  height: 24px;
 }
 
 .ticket-actions {
@@ -939,6 +1051,14 @@ th {
   display: flex;
   justify-content: space-between;
   gap: 16px;
+}
+
+.invoice__head > strong {
+  /* El numero de venta (V-XXXXXXXX) no debe partirse a mitad de palabra ni
+     quedar sin margen contra el borde de la pagina al imprimir/exportar PDF
+     con un nombre de negocio largo (ver invoice__head en views-historial.js). */
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .invoice__brand {
@@ -1595,4 +1715,50 @@ button:disabled { cursor: wait; opacity: 0.6; }
   .product-card__meta { display: none; }
   .modal-backdrop { padding: 10px; }
   .modal { padding: 16px; }
+  .login-card { padding: 24px 18px; }
 }
+
+/* Autenticación. */
+.shell.is-guest { grid-template-columns: minmax(0, 1fr); }
+.shell.is-guest .nav { display: none; }
+
+.login-screen {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  display: grid;
+  gap: 14px;
+  padding: 32px 28px;
+  background: var(--white);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.login-logo { width: 56px; height: 56px; border-radius: 14px; margin: 0 auto; }
+.login-card h1 { margin: 0; font-size: 1.3rem; }
+.login-sub { margin: 0 0 6px; color: var(--muted); font-size: 0.9rem; }
+.login-card .field { text-align: left; }
+.login-card .button { margin-top: 4px; width: 100%; }
+
+.nav-logout {
+  display: block;
+  width: 100%;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #d5deea;
+  text-align: left;
+  font: inherit;
+  font-weight: 700;
+}
+
+.nav-logout:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }

@@ -1,6 +1,6 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import patch
 from django.db import close_old_connections
 from django.http import HttpResponse, JsonResponse
@@ -8,13 +8,22 @@ from django.test import TestCase, TransactionTestCase, RequestFactory
 from django.utils import timezone
 from django.core.management import call_command
 from rest_framework.test import APIClient
+from . import accounts
 from .middleware import SanitizeIdsMiddleware
-from .models import Categoria, Producto, Cliente, Proveedor, Venta, Compra, RequestLog
+from .models import (Categoria, Producto, Cliente, Proveedor, Descuento, Venta, Compra, RequestLog, Sesion, Usuario,
+                     Reembolso, DetalleReembolso)
 
 
 class Fixtures:
+    """Estas pruebas cubren reglas de negocio/validación, no autenticación
+    (esa vive en AuthTests), así que autentican como administrador: ese rol
+    tiene todos los permisos que el admin original (sin auth) ejercía aquí."""
     def setUp(self):
         self.client = APIClient()
+        self.admin = Usuario(usuario='admin-test', rol='administrador')
+        self.admin.set_password('x')
+        self.admin.save()
+        self.client.force_authenticate(user=self.admin)
         self.category = Categoria.objects.create(nombre='Papelería')
         self.product = Producto.objects.create(codigo='PL-001', nombre='Cuaderno', categoria=self.category,
                                               precio=1000, costo=500, stock=5)
@@ -193,6 +202,596 @@ class ApiTests(Fixtures, TestCase):
         self.assertFalse(Producto.objects.filter(codigo='PL-002').exists())
 
 
+class DescuentoTests(Fixtures, TestCase):
+    def setUp(self):
+        super().setUp()
+        self.percent = Descuento.objects.create(nombre='10%', tipo='porcentual', valor=10)
+        self.fixed = Descuento.objects.create(nombre='Fijo 500', tipo='fijo', valor=500)
+        # product: precio=1000, costo=500, stock=5 (ver Fixtures.setUp)
+
+    def test_crud_basico(self):
+        response = self.client.post('/api/descuentos/', {'nombre': 'Nuevo', 'tipo': 'fijo', 'valor': 100}, format='json')
+        self.assertEqual(response.status_code, 201)
+        pk = response.json()['data']['id']
+        self.assertEqual(self.client.patch(f'/api/descuentos/{pk}/', {'valor': 200}, format='json').status_code, 200)
+        self.assertEqual(self.client.get(f'/api/descuentos/{pk}/').json()['data']['valor'], 200)
+        self.assertEqual(self.client.delete(f'/api/descuentos/{pk}/').status_code, 200)
+
+    def test_validaciones_estrictas(self):
+        cases = ({'nombre': 'X', 'tipo': 'porcentual', 'valor': 0}, {'nombre': 'X', 'tipo': 'porcentual', 'valor': 101},
+                  {'nombre': 'X', 'tipo': 'fijo', 'valor': 0}, {'nombre': 'X', 'tipo': 'otro', 'valor': 10},
+                  {'tipo': 'fijo', 'valor': 10}, {'nombre': 'X', 'tipo': 'fijo', 'valor': -5})
+        for payload in cases:
+            with self.subTest(payload=payload):
+                self.assertEqual(self.client.post('/api/descuentos/', payload, format='json').status_code, 400)
+
+    def test_cajero_solo_lee_descuentos(self):
+        cajero = Usuario(usuario='cajero-desc', rol='cajero')
+        cajero.set_password('x')
+        cajero.save()
+        client = APIClient()
+        client.force_authenticate(user=cajero)
+        self.assertEqual(client.get('/api/descuentos/').status_code, 200)
+        self.assertEqual(client.post('/api/descuentos/', {'nombre': 'X', 'tipo': 'fijo', 'valor': 10}, format='json').status_code, 403)
+        self.assertEqual(client.patch(f'/api/descuentos/{self.percent.pk}/', {'valor': 20}, format='json').status_code, 403)
+        self.assertEqual(client.delete(f'/api/descuentos/{self.percent.pk}/').status_code, 403)
+
+    def test_calculo_porcentual_sobre_subtotal(self):
+        # 2 x 1000 = 2000 de subtotal; 10% = 200 de descuento; total 1800.
+        response = self.client.post('/api/ventas/', self.sale(2, descuentoId=str(self.percent.pk), valorRecibido=1800), format='json')
+        self.assertEqual(response.status_code, 201, response.content)
+        data = response.json()['data']
+        self.assertEqual(data['subtotal'], 2000)
+        self.assertEqual(data['descuentoNombre'], '10%')
+        self.assertEqual(data['descuentoTipo'], 'porcentual')
+        self.assertEqual(data['descuentoMonto'], 200)
+        self.assertEqual(data['total'], 1800)
+        self.assertEqual(data['cambio'], 0)
+
+    def test_calculo_fijo_sobre_subtotal(self):
+        response = self.client.post('/api/ventas/', self.sale(2, descuentoId=str(self.fixed.pk), valorRecibido=1500), format='json')
+        self.assertEqual(response.status_code, 201, response.content)
+        data = response.json()['data']
+        self.assertEqual(data['descuentoMonto'], 500)
+        self.assertEqual(data['total'], 1500)
+
+    def test_fijo_mayor_que_subtotal_rechazado_al_crear(self):
+        grande = Descuento.objects.create(nombre='Grande', tipo='fijo', valor=5000)
+        response = self.client.post('/api/ventas/', self.sale(1, descuentoId=str(grande.pk)), format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('descuentoId', response.json()['errors'])
+        self.assertEqual(Venta.objects.count(), 0)
+
+    def test_fijo_mayor_que_subtotal_rechazado_al_guardar_abierta_y_al_cerrar(self):
+        medio = Descuento.objects.create(nombre='Medio', tipo='fijo', valor=1500)
+        opened = self.client.post('/api/ventas/', self.sale(2, estado='abierta', valorRecibido=0, descuentoId=str(medio.pk)), format='json')
+        self.assertEqual(opened.status_code, 201, opened.content)
+        pk = opened.json()['data']['id']
+        # Reducir a 1 item: subtotal baja a 1000, menor que el descuento fijo de 1500.
+        reducido = json.dumps([{'productoId': str(self.product.pk), 'cantidad': 1}])
+        response = self.client.patch(f'/api/ventas/{pk}/', {'itemsJson': reducido}, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('descuentoId', response.json()['errors'])
+        cierre = self.client.patch(f'/api/ventas/{pk}/', {'itemsJson': reducido, 'estado': 'cerrada', 'valorRecibido': 0}, format='json')
+        self.assertEqual(cierre.status_code, 400)
+
+    def test_un_solo_descuento_el_nuevo_reemplaza_al_anterior(self):
+        opened = self.client.post('/api/ventas/', self.sale(2, estado='abierta', valorRecibido=0, descuentoId=str(self.percent.pk)), format='json').json()['data']
+        response = self.client.patch(f'/api/ventas/{opened["id"]}/', {'descuentoId': str(self.fixed.pk)}, format='json')
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()['data']
+        self.assertEqual(data['descuentoNombre'], self.fixed.nombre)
+        self.assertEqual(data['descuentoMonto'], 500)
+
+    def test_cierre_con_descuento_descuenta_stock_normalmente(self):
+        response = self.client.post('/api/ventas/', self.sale(2, descuentoId=str(self.percent.pk), valorRecibido=1800), format='json')
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(self.stock(), 3)
+
+    def test_stock_no_cambia_por_el_descuento_en_si(self):
+        before = self.stock()
+        self.client.post('/api/ventas/', self.sale(2, descuentoId=str(self.percent.pk), valorRecibido=1800), format='json')
+        self.assertEqual(before - self.stock(), 2)  # exactamente la cantidad vendida, nada mas
+
+    def test_eliminar_descuento_usado_no_altera_la_venta_cerrada_ni_su_factura(self):
+        response = self.client.post('/api/ventas/', self.sale(2, descuentoId=str(self.percent.pk), valorRecibido=1800), format='json')
+        sale_id = response.json()['data']['id']
+        self.assertEqual(self.client.delete(f'/api/descuentos/{self.percent.pk}/').status_code, 200)
+        detail = self.client.get(f'/api/ventas/{sale_id}/').json()['data']
+        self.assertEqual(detail['descuentoId'], '')
+        self.assertEqual(detail['descuentoNombre'], '10%')
+        self.assertEqual(detail['descuentoValor'], 10)
+        self.assertEqual(detail['descuentoMonto'], 200)
+        self.assertEqual(detail['total'], 1800)
+
+    def test_editar_descuento_no_altera_venta_existente(self):
+        response = self.client.post('/api/ventas/', self.sale(2, descuentoId=str(self.percent.pk), valorRecibido=1800), format='json')
+        sale_id = response.json()['data']['id']
+        self.assertEqual(self.client.patch(f'/api/descuentos/{self.percent.pk}/', {'valor': 50}, format='json').status_code, 200)
+        detail = self.client.get(f'/api/ventas/{sale_id}/').json()['data']
+        self.assertEqual(detail['descuentoValor'], 10)
+        self.assertEqual(detail['total'], 1800)
+
+    def test_resave_abierta_usa_copia_congelada_no_el_catalogo_editado(self):
+        """Regresion: antes de este cambio, services.save_document releia
+        record.descuento (la relacion en vivo) en cada guardado sin importar
+        si el descuentoId habia cambiado, asi que reguardar una venta abierta
+        aplicaba el valor *actual* del catalogo en vez del congelado."""
+        opened = self.client.post('/api/ventas/', self.sale(2, estado='abierta', valorRecibido=0, descuentoId=str(self.percent.pk)), format='json')
+        self.assertEqual(opened.status_code, 201, opened.content)
+        sale_id = opened.json()['data']['id']
+        self.assertEqual(opened.json()['data']['descuentoValor'], 10)
+        # Se edita el catalogo DESPUES de aplicarlo a la venta.
+        self.assertEqual(self.client.patch(f'/api/descuentos/{self.percent.pk}/', {'valor': 50}, format='json').status_code, 200)
+        # Reguardar la MISMA venta abierta reenviando el mismo descuentoId no
+        # debe releer el 50% nuevo: sigue siendo el mismo descuento aplicado.
+        resend = self.client.patch(f'/api/ventas/{sale_id}/', {'descuentoId': str(self.percent.pk)}, format='json')
+        self.assertEqual(resend.status_code, 200, resend.content)
+        self.assertEqual(resend.json()['data']['descuentoValor'], 10)
+        self.assertEqual(resend.json()['data']['descuentoMonto'], 200)
+
+    def test_cambiar_a_un_descuento_distinto_si_usa_su_valor_vigente(self):
+        opened = self.client.post('/api/ventas/', self.sale(2, estado='abierta', valorRecibido=0, descuentoId=str(self.percent.pk)), format='json')
+        sale_id = opened.json()['data']['id']
+        switched = self.client.patch(f'/api/ventas/{sale_id}/', {'descuentoId': str(self.fixed.pk)}, format='json')
+        self.assertEqual(switched.status_code, 200, switched.content)
+        self.assertEqual(switched.json()['data']['descuentoNombre'], self.fixed.nombre)
+        self.assertEqual(switched.json()['data']['descuentoMonto'], 500)
+
+    def test_venta_abierta_con_descuento_se_guarda_y_se_retoma(self):
+        response = self.client.post('/api/ventas/', self.sale(2, estado='abierta', valorRecibido=0, descuentoId=str(self.percent.pk)), format='json')
+        self.assertEqual(response.status_code, 201, response.content)
+        sale_id = response.json()['data']['id']
+        retomada = self.client.get(f'/api/ventas/{sale_id}/').json()['data']
+        self.assertEqual(retomada['estado'], 'abierta')
+        self.assertEqual(retomada['descuentoNombre'], '10%')
+        self.assertEqual(retomada['descuentoMonto'], 200)
+        self.assertEqual(retomada['total'], 1800)
+
+    def test_reintento_idempotente_del_cierre_con_descuento_no_duplica(self):
+        response = self.client.post('/api/ventas/', self.sale(2, descuentoId=str(self.percent.pk), valorRecibido=1800), format='json')
+        record = response.json()['data']
+        retry = self.client.put(f'/api/ventas/{record["id"]}/', record, format='json')
+        self.assertEqual(retry.status_code, 200, retry.content)
+        self.assertEqual(self.stock(), 3)
+        self.assertEqual(Venta.objects.count(), 1)
+
+
+class CorreccionTests(Fixtures, TestCase):
+    def setUp(self):
+        super().setUp()
+        self.product2 = Producto.objects.create(codigo='PL-002', nombre='Lapicero', categoria=self.category,
+                                                precio=500, costo=200, stock=10)
+        self.untracked = Producto.objects.create(codigo='PL-003', nombre='Servicio', categoria=self.category,
+                                                precio=300, costo=100, seguimiento_inventario=False, stock=0)
+        # product x2 (1000 c/u) + product2 x3 (500 c/u) = 3500. Efectivo exacto.
+        items = json.dumps([{'productoId': str(self.product.pk), 'cantidad': 2}, {'productoId': str(self.product2.pk), 'cantidad': 3}])
+        response = self.client.post('/api/ventas/', self.sale(itemsJson=items, valorRecibido=3500), format='json')
+        self.assertEqual(response.status_code, 201, response.content)
+        self.sale_data = response.json()['data']
+        self.sale_id = self.sale_data['id']
+        # product: 5-2=3 ; product2: 10-3=7.
+
+    def correct(self, sale_id, items, **extra):
+        payload = {'itemsJson': json.dumps(items), 'metodoPago': extra.pop('metodoPago', 'Efectivo'),
+                  'valorRecibido': extra.pop('valorRecibido', 0), 'clienteId': extra.pop('clienteId', ''), **extra}
+        return self.client.post(f'/api/ventas/{sale_id}/corregir/', payload, format='json')
+
+    def items_base(self, product_qty=2, product2_qty=3):
+        items = []
+        if product_qty is not None:
+            items.append({'productoId': str(self.product.pk), 'cantidad': product_qty})
+        if product2_qty is not None:
+            items.append({'productoId': str(self.product2.pk), 'cantidad': product2_qty})
+        return items
+
+    def test_cajero_403(self):
+        cajero = Usuario(usuario='cajero-corr', rol='cajero')
+        cajero.set_password('x')
+        cajero.save()
+        client = APIClient()
+        client.force_authenticate(user=cajero)
+        payload = {'itemsJson': json.dumps(self.items_base()), 'metodoPago': 'Efectivo', 'valorRecibido': 3500, 'clienteId': ''}
+        response = client.post(f'/api/ventas/{self.sale_id}/corregir/', payload, format='json')
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.stock(), 3)
+
+    def test_venta_no_cerrada_rechazada(self):
+        opened = self.client.post('/api/ventas/', self.sale(1, estado='abierta', valorRecibido=0), format='json').json()['data']
+        response = self.correct(opened['id'], [{'productoId': str(self.product.pk), 'cantidad': 1}], valorRecibido=1000)
+        self.assertEqual(response.status_code, 400)
+
+    def test_sin_items_rechazado(self):
+        response = self.client.post(f'/api/ventas/{self.sale_id}/corregir/',
+                                   {'itemsJson': '[]', 'metodoPago': 'Efectivo', 'valorRecibido': 3500, 'clienteId': ''}, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.stock(), 3)
+
+    def test_cantidad_hacia_arriba_descuenta_la_diferencia(self):
+        response = self.correct(self.sale_id, self.items_base(product_qty=4), valorRecibido=5500)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 1)  # 3 - (4-2)
+
+    def test_cantidad_hacia_abajo_restaura_la_diferencia(self):
+        response = self.correct(self.sale_id, self.items_base(product2_qty=1), valorRecibido=2500)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.product2.refresh_from_db()
+        self.assertEqual(self.product2.stock, 9)  # 7 + (3-1)
+
+    def test_eliminar_linea_restaura_su_cantidad(self):
+        response = self.correct(self.sale_id, self.items_base(product2_qty=None), valorRecibido=2000)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.product2.refresh_from_db()
+        self.assertEqual(self.product2.stock, 10)  # 7 + 3 restaurado
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 3)  # product no cambio
+
+    def test_agregar_producto_descuenta_su_cantidad(self):
+        items = self.items_base() + [{'productoId': str(self.untracked.pk), 'cantidad': 1}]
+        # untracked no tiene seguimiento; agreguemos uno nuevo CON seguimiento.
+        extra = Producto.objects.create(codigo='PL-004', nombre='Agregado', categoria=self.category, precio=200, costo=80, stock=20)
+        items = self.items_base() + [{'productoId': str(extra.pk), 'cantidad': 5}]
+        response = self.correct(self.sale_id, items, valorRecibido=4500)
+        self.assertEqual(response.status_code, 200, response.content)
+        extra.refresh_from_db()
+        self.assertEqual(extra.stock, 15)  # 20 - 5
+
+    def test_producto_sin_seguimiento_no_mueve_stock(self):
+        items = self.items_base() + [{'productoId': str(self.untracked.pk), 'cantidad': 7}]
+        response = self.correct(self.sale_id, items, valorRecibido=3500 + 7 * 300)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.untracked.refresh_from_db()
+        self.assertEqual(self.untracked.stock, 0)
+
+    def test_stock_negativo_rechazado_sin_cambios_parciales(self):
+        response = self.correct(self.sale_id, self.items_base(product_qty=999), metodoPago='Nequi')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('Cuaderno', response.json()['errors']['stock'])
+        self.product.refresh_from_db(); self.product2.refresh_from_db()
+        self.assertEqual(self.product.stock, 3)
+        self.assertEqual(self.product2.stock, 7)
+        venta = Venta.objects.get(pk=self.sale_id)
+        self.assertEqual(venta.subtotal, 3500)
+        self.assertFalse(venta.corregida)
+
+    def test_cambio_de_cliente(self):
+        response = self.correct(self.sale_id, self.items_base(), valorRecibido=3500, clienteId=str(self.customer.pk))
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['data']['clienteId'], str(self.customer.pk))
+
+    def test_efectivo_a_debe_exige_cliente(self):
+        response = self.correct(self.sale_id, self.items_base(), metodoPago='Debe', clienteId='')
+        self.assertEqual(response.status_code, 400)
+
+    def test_efectivo_a_debe_con_cliente_ok_y_luego_debe_a_efectivo_exige_valor_recibido(self):
+        ok = self.correct(self.sale_id, self.items_base(), metodoPago='Debe', clienteId=str(self.customer.pk))
+        self.assertEqual(ok.status_code, 200, ok.content)
+        self.assertEqual(ok.json()['data']['metodoPago'], 'Debe')
+        insuficiente = self.correct(self.sale_id, self.items_base(), metodoPago='Efectivo', valorRecibido=100, clienteId=str(self.customer.pk))
+        self.assertEqual(insuficiente.status_code, 400)
+
+    def test_id_se_conserva(self):
+        response = self.correct(self.sale_id, self.items_base(product_qty=1), valorRecibido=2500)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['data']['id'], self.sale_id)
+
+    def test_campos_de_trazabilidad(self):
+        response = self.correct(self.sale_id, self.items_base(product_qty=1), valorRecibido=2500)
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()['data']
+        self.assertTrue(data['corregida'])
+        self.assertEqual(data['corregidaPor'], self.admin.usuario)
+        self.assertIsNotNone(data['corregidaEn'])
+
+    def test_segunda_correccion_calcula_diferencia_respecto_al_estado_actual(self):
+        first = self.correct(self.sale_id, self.items_base(product_qty=4), valorRecibido=5500)
+        self.assertEqual(first.status_code, 200, first.content)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 1)  # 3 - (4-2)
+        second = self.correct(self.sale_id, self.items_base(product_qty=1), valorRecibido=2500)
+        self.assertEqual(second.status_code, 200, second.content)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 4)  # 1 + (4-1), diferencia contra el estado de la 1a correccion
+
+    def test_reenvio_identico_no_duplica_stock(self):
+        payload_items = self.items_base(product_qty=4)
+        first = self.correct(self.sale_id, payload_items, valorRecibido=5500)
+        self.assertEqual(first.status_code, 200, first.content)
+        self.product.refresh_from_db()
+        stock_after_first = self.product.stock
+        second = self.correct(self.sale_id, payload_items, valorRecibido=5500)
+        self.assertEqual(second.status_code, 200, second.content)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, stock_after_first)
+
+    def test_precio_unitario_original_se_conserva_en_lineas_existentes(self):
+        self.assertEqual(self.client.patch(f'/api/productos/{self.product.pk}/', {'precio': 9999}, format='json').status_code, 200)
+        extra = Producto.objects.create(codigo='PL-005', nombre='Nuevo en correccion', categoria=self.category, precio=777, costo=300, stock=10)
+        items = self.items_base(product_qty=2) + [{'productoId': str(extra.pk), 'cantidad': 1}]
+        response = self.correct(self.sale_id, items, valorRecibido=999999)
+        self.assertEqual(response.status_code, 200, response.content)
+        lines = {i['productoId']: i['precio'] for i in json.loads(response.json()['data']['itemsJson'])}
+        self.assertEqual(lines[str(self.product.pk)], 1000)  # precio original, no el 9999 nuevo
+        self.assertEqual(lines[str(extra.pk)], 777)  # agregado: precio vigente
+
+    def test_putpatch_normal_sobre_venta_cerrada_sigue_dando_409(self):
+        distinto = {**self.sale_data, 'metodoPago': 'Nequi'}
+        self.assertEqual(self.client.put(f'/api/ventas/{self.sale_id}/', distinto, format='json').status_code, 409)
+        self.assertEqual(self.client.patch(f'/api/ventas/{self.sale_id}/', {'metodoPago': 'Nequi'}, format='json').status_code, 409)
+
+    def test_descuento_porcentual_se_recalcula_sobre_el_nuevo_subtotal_con_la_copia_congelada(self):
+        descuento = Descuento.objects.create(nombre='10%', tipo='porcentual', valor=10)
+        # Producto propio con stock amplio, para no depender del que ya gasto el sale_id de setUp.
+        libre = Producto.objects.create(codigo='PL-006', nombre='Libre', categoria=self.category, precio=1000, costo=500, stock=20)
+        items = json.dumps([{'productoId': str(libre.pk), 'cantidad': 2}])
+        venta = self.client.post('/api/ventas/', self.sale(itemsJson=items, descuentoId=str(descuento.pk), valorRecibido=1800), format='json').json()['data']
+        # Se edita el catalogo DESPUES: no debe afectar la correccion.
+        descuento.valor = 50
+        descuento.save(update_fields=['valor'])
+        response = self.correct(venta['id'], [{'productoId': str(libre.pk), 'cantidad': 4}], valorRecibido=3600)
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()['data']
+        self.assertEqual(data['subtotal'], 4000)
+        self.assertEqual(data['descuentoValor'], 10)  # copia congelada, no el 50 editado
+        self.assertEqual(data['descuentoMonto'], 400)
+        self.assertEqual(data['total'], 3600)
+
+    def test_descuento_fijo_mayor_al_nuevo_subtotal_rechazado(self):
+        descuento = Descuento.objects.create(nombre='Fijo 1500', tipo='fijo', valor=1500)
+        items = json.dumps([{'productoId': str(self.product.pk), 'cantidad': 2}])
+        venta = self.client.post('/api/ventas/', self.sale(itemsJson=items, descuentoId=str(descuento.pk), valorRecibido=500), format='json').json()['data']
+        response = self.correct(venta['id'], [{'productoId': str(self.product.pk), 'cantidad': 1}], valorRecibido=0)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('descuentoId', response.json()['errors'])
+
+    def test_descuento_eliminado_del_catalogo_no_afecta_la_correccion(self):
+        descuento = Descuento.objects.create(nombre='Se borra', tipo='fijo', valor=200)
+        items = json.dumps([{'productoId': str(self.product.pk), 'cantidad': 2}])
+        venta = self.client.post('/api/ventas/', self.sale(itemsJson=items, descuentoId=str(descuento.pk), valorRecibido=1800), format='json').json()['data']
+        self.assertEqual(self.client.delete(f'/api/descuentos/{descuento.pk}/').status_code, 200)
+        response = self.correct(venta['id'], [{'productoId': str(self.product.pk), 'cantidad': 3}], valorRecibido=2800)
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()['data']
+        self.assertEqual(data['descuentoNombre'], 'Se borra')
+        self.assertEqual(data['descuentoMonto'], 200)
+        self.assertEqual(data['total'], 2800)
+
+    def test_correccion_bloqueada_con_409_tras_reembolso(self):
+        # Antes de cualquier reembolso, corregir funciona normalmente.
+        response = self.correct(self.sale_id, self.items_base(product_qty=3), valorRecibido=4500)
+        self.assertEqual(response.status_code, 200, response.content)
+        refund = self.client.post(f'/api/ventas/{self.sale_id}/reembolsos/',
+                                  {'itemsJson': json.dumps([{'productoId': str(self.product.pk), 'cantidad': 1, 'retornaInventario': True}])},
+                                  format='json')
+        self.assertEqual(refund.status_code, 201, refund.content)
+        blocked = self.correct(self.sale_id, self.items_base(product_qty=2), valorRecibido=3500)
+        self.assertEqual(blocked.status_code, 409)
+        self.assertIn('reembolsos', blocked.json()['message'].lower())
+
+
+class ReembolsoTests(Fixtures, TestCase):
+    def setUp(self):
+        super().setUp()
+        self.product2 = Producto.objects.create(codigo='PL-002', nombre='Lapicero', categoria=self.category,
+                                                precio=500, costo=200, stock=10)
+        self.untracked = Producto.objects.create(codigo='PL-003', nombre='Servicio', categoria=self.category,
+                                                seguimiento_inventario=False, stock=0, precio=300, costo=100)
+        # product x4 (1000 c/u) + product2 x3 (500 c/u) + untracked x1 = 5800. Efectivo exacto.
+        items = json.dumps([{'productoId': str(self.product.pk), 'cantidad': 4},
+                            {'productoId': str(self.product2.pk), 'cantidad': 3},
+                            {'productoId': str(self.untracked.pk), 'cantidad': 1}])
+        response = self.client.post('/api/ventas/', self.sale(itemsJson=items, valorRecibido=5800), format='json')
+        self.assertEqual(response.status_code, 201, response.content)
+        self.sale_data = response.json()['data']
+        self.sale_id = self.sale_data['id']
+        # product: 5-4=1 ; product2: 10-3=7.
+
+    def refund(self, sale_id=None, items=None, **extra):
+        payload = {'itemsJson': json.dumps(items) if items is not None else '[]', **extra}
+        return self.client.post(f'/api/ventas/{sale_id or self.sale_id}/reembolsos/', payload, format='json')
+
+    def line(self, producto, cantidad, retorna=True):
+        return {'productoId': str(producto.pk), 'cantidad': cantidad, 'retornaInventario': retorna}
+
+    def test_cajero_403(self):
+        cajero = Usuario(usuario='cajero-reemb', rol='cajero')
+        cajero.set_password('x')
+        cajero.save()
+        client = APIClient()
+        client.force_authenticate(user=cajero)
+        response = client.post(f'/api/ventas/{self.sale_id}/reembolsos/', {'itemsJson': json.dumps([self.line(self.product, 1)])}, format='json')
+        self.assertEqual(response.status_code, 403)
+
+    def test_venta_no_cerrada_rechazada(self):
+        abierta = self.client.post('/api/ventas/', self.sale(estado='abierta', valorRecibido=0), format='json').json()['data']
+        response = self.refund(abierta['id'], [self.line(self.product, 1)])
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('estado', response.json()['errors'])
+
+    def test_sin_lineas_rechazado(self):
+        response = self.refund(items=[])
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('itemsJson', response.json()['errors'])
+
+    def test_lineas_duplicadas_rechazadas(self):
+        response = self.refund(items=[self.line(self.product, 1), self.line(self.product, 1)])
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('itemsJson', response.json()['errors'])
+
+    def test_cantidad_invalida_rechazada(self):
+        for cantidad in (0, -1):
+            with self.subTest(cantidad=cantidad):
+                response = self.refund(items=[{'productoId': str(self.product.pk), 'cantidad': cantidad, 'retornaInventario': True}])
+                self.assertEqual(response.status_code, 400)
+
+    def test_total_y_lineas_a_la_vez_rechazado(self):
+        response = self.refund(items=[self.line(self.product, 1)], total=True)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('itemsJson', response.json()['errors'])
+
+    def test_reembolso_parcial(self):
+        response = self.refund(items=[self.line(self.product, 1)])
+        self.assertEqual(response.status_code, 201, response.content)
+        data = response.json()['data']
+        self.assertEqual(data['estadoReembolso'], 'parcial')
+        self.assertEqual(len(data['reembolsos']), 1)
+        self.assertEqual(data['reembolsos'][0]['monto'], 1000)  # sin descuento: 1000 * (5800/5800) = 1000
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 2)  # 1 (tras la venta) + 1 devuelto
+
+    def test_reembolso_total(self):
+        response = self.refund(total=True)
+        self.assertEqual(response.status_code, 201, response.content)
+        data = response.json()['data']
+        self.assertEqual(data['estadoReembolso'], 'total')
+        self.assertEqual(data['totalReembolsado'], 5800)
+        self.product.refresh_from_db(); self.product2.refresh_from_db()
+        self.assertEqual(self.product.stock, 5)
+        self.assertEqual(self.product2.stock, 10)
+
+    def test_reembolso_total_sin_nada_pendiente_rechazado(self):
+        self.assertEqual(self.refund(total=True).status_code, 201)
+        response = self.refund(total=True)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('total', response.json()['errors'])
+
+    def test_cantidad_mayor_a_disponible_incluyendo_previos_rechazada(self):
+        self.assertEqual(self.refund(items=[self.line(self.product, 2)]).status_code, 201)
+        # Quedan 2 disponibles de 4; pedir 3 mas debe rechazarse.
+        response = self.refund(items=[self.line(self.product, 3)])
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('itemsJson', response.json()['errors'])
+
+    def test_dos_parciales_y_luego_total_sobre_lo_restante(self):
+        self.assertEqual(self.refund(items=[self.line(self.product, 1)]).status_code, 201)
+        self.assertEqual(self.refund(items=[self.line(self.product2, 1)]).status_code, 201)
+        response = self.refund(total=True)
+        self.assertEqual(response.status_code, 201, response.content)
+        data = response.json()['data']
+        self.assertEqual(data['estadoReembolso'], 'total')
+        self.assertEqual(data['totalReembolsado'], 5800)
+        self.product.refresh_from_db(); self.product2.refresh_from_db()
+        self.assertEqual(self.product.stock, 5)
+        self.assertEqual(self.product2.stock, 10)
+
+    def test_monto_proporcional_con_descuento_porcentual(self):
+        descuento = Descuento.objects.create(nombre='10%', tipo='porcentual', valor=10)
+        libre = Producto.objects.create(codigo='PL-007', nombre='Libre', categoria=self.category, precio=1000, costo=500, stock=20)
+        items = json.dumps([{'productoId': str(libre.pk), 'cantidad': 4}])
+        venta = self.client.post('/api/ventas/', self.sale(itemsJson=items, descuentoId=str(descuento.pk), valorRecibido=3600), format='json').json()['data']
+        self.assertEqual(venta['subtotal'], 4000)
+        self.assertEqual(venta['total'], 3600)
+        response = self.refund(venta['id'], [self.line(libre, 2)])
+        self.assertEqual(response.status_code, 201, response.content)
+        # 2000 * (3600/4000) = 1800.
+        self.assertEqual(response.json()['data']['reembolsos'][0]['monto'], 1800)
+
+    def test_monto_proporcional_con_descuento_fijo(self):
+        descuento = Descuento.objects.create(nombre='Fijo 400', tipo='fijo', valor=400)
+        libre = Producto.objects.create(codigo='PL-008', nombre='Libre2', categoria=self.category, precio=1000, costo=500, stock=20)
+        items = json.dumps([{'productoId': str(libre.pk), 'cantidad': 4}])
+        venta = self.client.post('/api/ventas/', self.sale(itemsJson=items, descuentoId=str(descuento.pk), valorRecibido=3600), format='json').json()['data']
+        self.assertEqual(venta['total'], 3600)
+        response = self.refund(venta['id'], [self.line(libre, 2)])
+        self.assertEqual(response.status_code, 201, response.content)
+        # 2000 * (3600/4000) = 1800.
+        self.assertEqual(response.json()['data']['reembolsos'][0]['monto'], 1800)
+
+    def test_suma_exacta_al_total_con_redondeo_incomodo_15_porciento(self):
+        descuento = Descuento.objects.create(nombre='15%', tipo='porcentual', valor=15)
+        a = Producto.objects.create(codigo='PL-010', nombre='A', categoria=self.category, precio=100, costo=50, stock=5)
+        b = Producto.objects.create(codigo='PL-011', nombre='B', categoria=self.category, precio=100, costo=50, stock=5)
+        c = Producto.objects.create(codigo='PL-012', nombre='C', categoria=self.category, precio=101, costo=50, stock=5)
+        items = json.dumps([{'productoId': str(a.pk), 'cantidad': 1}, {'productoId': str(b.pk), 'cantidad': 1}, {'productoId': str(c.pk), 'cantidad': 1}])
+        venta = self.client.post('/api/ventas/', self.sale(itemsJson=items, descuentoId=str(descuento.pk), valorRecibido=256), format='json').json()['data']
+        self.assertEqual(venta['subtotal'], 301)
+        self.assertEqual(venta['descuentoMonto'], 45)
+        self.assertEqual(venta['total'], 256)
+        response = self.refund(venta['id'], total=True)
+        self.assertEqual(response.status_code, 201, response.content)
+        data = response.json()['data']
+        montos = sorted(i['monto'] for i in data['reembolsos'][0]['items'])
+        self.assertEqual(montos, [85, 85, 86])
+        self.assertEqual(sum(montos), 256)
+        self.assertEqual(data['totalReembolsado'], 256)
+
+    def test_retorna_true_sube_stock_false_no_cambia(self):
+        response = self.refund(items=[self.line(self.product, 1, retorna=True), self.line(self.product2, 1, retorna=False)])
+        self.assertEqual(response.status_code, 201, response.content)
+        self.product.refresh_from_db(); self.product2.refresh_from_db()
+        self.assertEqual(self.product.stock, 2)  # 1 + 1 devuelto
+        self.assertEqual(self.product2.stock, 7)  # 7 sin cambios: no retorna
+
+    def test_producto_sin_seguimiento_no_mueve_stock(self):
+        response = self.refund(items=[self.line(self.untracked, 1, retorna=True)])
+        self.assertEqual(response.status_code, 201, response.content)
+        self.untracked.refresh_from_db()
+        self.assertEqual(self.untracked.stock, 0)
+
+    def test_reenvio_mismo_id_no_duplica_monto_ni_stock(self):
+        refund_id = '11111111-1111-1111-1111-111111111111'
+        payload = {'id': refund_id, 'itemsJson': json.dumps([self.line(self.product, 1)])}
+        first = self.client.post(f'/api/ventas/{self.sale_id}/reembolsos/', payload, format='json')
+        self.assertEqual(first.status_code, 201, first.content)
+        self.assertEqual(Reembolso.objects.count(), 1)
+        second = self.client.post(f'/api/ventas/{self.sale_id}/reembolsos/', payload, format='json')
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertEqual(Reembolso.objects.count(), 1)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 2)
+
+    def test_reenvio_mismo_id_total_no_duplica(self):
+        refund_id = '22222222-2222-2222-2222-222222222222'
+        payload = {'id': refund_id, 'total': True, 'itemsJson': '[]'}
+        first = self.client.post(f'/api/ventas/{self.sale_id}/reembolsos/', payload, format='json')
+        self.assertEqual(first.status_code, 201, first.content)
+        second = self.client.post(f'/api/ventas/{self.sale_id}/reembolsos/', payload, format='json')
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertEqual(Reembolso.objects.count(), 1)
+
+    def test_reenvio_mismo_id_con_datos_distintos_rechazado(self):
+        refund_id = '33333333-3333-3333-3333-333333333333'
+        self.client.post(f'/api/ventas/{self.sale_id}/reembolsos/', {'id': refund_id, 'itemsJson': json.dumps([self.line(self.product, 1)])}, format='json')
+        response = self.client.post(f'/api/ventas/{self.sale_id}/reembolsos/', {'id': refund_id, 'itemsJson': json.dumps([self.line(self.product, 2)])}, format='json')
+        self.assertEqual(response.status_code, 409)
+
+    def test_rollback_atomico_si_falla_a_mitad(self):
+        self.product.refresh_from_db()
+        stock_antes = self.product.stock
+        with patch('facturacion.services.DetalleReembolso.objects.bulk_create', side_effect=RuntimeError('fallo')):
+            with self.assertRaises(RuntimeError):
+                self.refund(items=[self.line(self.product, 1)])
+        self.assertEqual(Reembolso.objects.count(), 0)
+        self.assertEqual(DetalleReembolso.objects.count(), 0)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, stock_antes)
+
+    def test_estado_reembolso_visible_para_cajero(self):
+        self.assertEqual(self.refund(items=[self.line(self.product, 1)]).status_code, 201)
+        cajero = Usuario(usuario='cajero-ver', rol='cajero')
+        cajero.set_password('x')
+        cajero.save()
+        client = APIClient()
+        client.force_authenticate(user=cajero)
+        response = client.get(f'/api/ventas/{self.sale_id}/')
+        self.assertEqual(response.status_code, 200)
+        data = response.json()['data']
+        self.assertEqual(data['estadoReembolso'], 'parcial')
+        self.assertEqual(len(data['reembolsos']), 1)
+
+    def test_usuario_y_fecha_registrados(self):
+        response = self.refund(items=[self.line(self.product, 1)])
+        detalle = response.json()['data']['reembolsos'][0]
+        self.assertEqual(detalle['usuario'], 'admin-test')
+        self.assertTrue(detalle['fecha'])
+
+    def test_putpatch_normal_sobre_venta_cerrada_sigue_dando_409_con_reembolso(self):
+        self.assertEqual(self.refund(items=[self.line(self.product, 1)]).status_code, 201)
+        response = self.client.patch(f'/api/ventas/{self.sale_id}/', {'metodoPago': 'Nequi'}, format='json')
+        self.assertEqual(response.status_code, 409)
+
+
 class ConcurrencyTests(Fixtures, TransactionTestCase):
     def test_two_buyers_cannot_oversell(self):
         payload = self.sale(4)
@@ -200,7 +799,9 @@ class ConcurrencyTests(Fixtures, TransactionTestCase):
         def buy():
             close_old_connections()
             try:
-                return APIClient().post('/api/ventas/', payload, format='json').status_code
+                client = APIClient()
+                client.force_authenticate(user=self.admin)
+                return client.post('/api/ventas/', payload, format='json').status_code
             finally:
                 close_old_connections()
 
@@ -208,4 +809,201 @@ class ConcurrencyTests(Fixtures, TransactionTestCase):
             statuses = list(pool.map(lambda _: buy(), range(2)))
         self.assertEqual(sorted(statuses), [201, 400])
         self.assertEqual(self.stock(), 1)
-        self.assertEqual(Venta.objects.count(), 1)
+
+    def test_correction_and_new_sale_cannot_oversell_together(self):
+        # self.product: stock 5. Cierra una venta de 1 unidad (stock -> 4).
+        closed = self.client.post('/api/ventas/', self.sale(1, valorRecibido=1000), format='json').json()['data']
+        new_sale_payload = self.sale(2, valorRecibido=2000)  # pide 2 de las 4 que quedan
+
+        def correct():
+            close_old_connections()
+            try:
+                client = APIClient()
+                client.force_authenticate(user=self.admin)
+                # Sube la correccion de 1 a 3 unidades: pide 2 mas de las 4 que quedan.
+                payload = {'itemsJson': json.dumps([{'productoId': str(self.product.pk), 'cantidad': 3}]),
+                          'metodoPago': 'Efectivo', 'valorRecibido': 3000, 'clienteId': ''}
+                return client.post(f'/api/ventas/{closed["id"]}/corregir/', payload, format='json').status_code
+            finally:
+                close_old_connections()
+
+        def buy():
+            close_old_connections()
+            try:
+                client = APIClient()
+                client.force_authenticate(user=self.admin)
+                return client.post('/api/ventas/', new_sale_payload, format='json').status_code
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            statuses = sorted(pool.map(lambda fn: fn(), [correct, buy]))
+        # Entre los dos piden exactamente las 4 unidades disponibles (2 + 2):
+        # el candado los serializa, así que ambos caben sin que el stock quede negativo.
+        self.assertEqual(statuses, [200, 201])
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 0)
+
+    def test_two_refunds_on_same_line_cannot_exceed_sold(self):
+        # self.product: stock 5. Vende 4 (stock -> 1), asi que lo vendido en
+        # la linea es 4: dos reembolsos concurrentes de 3 cada uno (6 en
+        # total) no pueden caber los dos.
+        sale = self.client.post('/api/ventas/', self.sale(4, valorRecibido=4000), format='json').json()['data']
+        payload = {'itemsJson': json.dumps([{'productoId': str(self.product.pk), 'cantidad': 3, 'retornaInventario': True}])}
+
+        def refund():
+            close_old_connections()
+            try:
+                client = APIClient()
+                client.force_authenticate(user=self.admin)
+                return client.post(f'/api/ventas/{sale["id"]}/reembolsos/', payload, format='json').status_code
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            statuses = sorted(pool.map(lambda _: refund(), range(2)))
+        self.assertEqual(statuses, [201, 400])
+        self.product.refresh_from_db()
+        # Gano exactamente una de las dos: 1 (tras la venta) + 3 devueltos = 4;
+        # nunca se reembolsaron las 6 unidades pedidas entre ambas.
+        self.assertEqual(self.product.stock, 4)
+
+
+class AuthTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = Usuario(usuario='admin', rol='administrador')
+        self.admin.set_password('admin123')
+        self.admin.save()
+        self.cajero = Usuario(usuario='cajero', rol='cajero')
+        self.cajero.set_password('cajero123')
+        self.cajero.save()
+        self.category = Categoria.objects.create(nombre='Papelería')
+        self.product = Producto.objects.create(codigo='PL-001', nombre='Cuaderno', categoria=self.category,
+                                              precio=1000, costo=500, stock=5)
+        self.provider = Proveedor.objects.create(nombre='Proveedor')
+
+    def login(self, usuario, contrasena):
+        return self.client.post('/api/auth/login/', {'usuario': usuario, 'contrasena': contrasena}, format='json')
+
+    def token_for(self, usuario_obj):
+        return self.login(usuario_obj.usuario, {self.admin: 'admin123', self.cajero: 'cajero123'}[usuario_obj]).json()['data']['token']
+
+    def test_login_success_returns_token_and_role(self):
+        response = self.login('admin', 'admin123')
+        self.assertEqual(response.status_code, 200)
+        data = response.json()['data']
+        self.assertTrue(data['token'])
+        self.assertEqual(data['usuario'], {'id': str(self.admin.pk), 'usuario': 'admin', 'rol': 'administrador'})
+
+    def test_login_is_case_insensitive_on_username(self):
+        self.assertEqual(self.login('ADMIN', 'admin123').status_code, 200)
+
+    def test_login_wrong_password(self):
+        self.assertEqual(self.login('admin', 'incorrecta').status_code, 401)
+
+    def test_login_unknown_user(self):
+        self.assertEqual(self.login('fantasma', 'x').status_code, 401)
+
+    def test_login_rejects_missing_or_unknown_fields(self):
+        self.assertEqual(self.client.post('/api/auth/login/', {'usuario': 'admin'}, format='json').status_code, 400)
+        self.assertEqual(self.client.post('/api/auth/login/', {'usuario': 'admin', 'contrasena': 'admin123', 'extra': 1}, format='json').status_code, 400)
+
+    def test_no_token_returns_401(self):
+        self.assertEqual(self.client.get('/api/productos/').status_code, 401)
+
+    def test_invalid_token_returns_401(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer no-existe')
+        self.assertEqual(self.client.get('/api/productos/').status_code, 401)
+
+    def test_malformed_header_returns_401(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Token abc')
+        self.assertEqual(self.client.get('/api/productos/').status_code, 401)
+
+    def test_expired_token_returns_401(self):
+        Sesion.objects.create(token='vencido', usuario=self.admin, expira_en=timezone.now() - timedelta(hours=1))
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer vencido')
+        self.assertEqual(self.client.get('/api/productos/').status_code, 401)
+
+    def test_logout_invalidates_token(self):
+        token = self.token_for(self.admin)
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer ' + token)
+        self.assertEqual(self.client.get('/api/auth/me/').status_code, 200)
+        self.assertEqual(self.client.post('/api/auth/logout/', {}, format='json').status_code, 200)
+        self.assertEqual(self.client.get('/api/auth/me/').status_code, 401)
+
+    def test_me_reflects_authenticated_user(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer ' + self.token_for(self.cajero))
+        response = self.client.get('/api/auth/me/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['data']['rol'], 'cajero')
+
+    def test_unknown_resource_is_404_regardless_of_role(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer ' + self.token_for(self.cajero))
+        self.assertEqual(self.client.get('/api/desconocido/').status_code, 404)
+
+    def test_role_permission_matrix(self):
+        """Parametrizado sobre accounts.PERMISSIONS: cada combinacion recurso+
+        metodo debe dar 403 para el rol no listado y nunca 403 para el listado
+        (el codigo final de negocio puede variar; aqui solo se prueba el rol)."""
+        detail = f'{self.product.pk}/'
+        cases = [
+            ('GET', 'categorias/', accounts.ROLES),
+            ('POST', 'categorias/', accounts.ADMIN),
+            ('DELETE', 'categorias/' + f'{self.category.pk}/', accounts.ADMIN),
+            ('GET', 'proveedores/', accounts.ADMIN),
+            ('POST', 'proveedores/', accounts.ADMIN),
+            ('GET', 'productos/', accounts.ROLES),
+            ('POST', 'productos/', accounts.ADMIN),
+            ('PATCH', 'productos/' + detail, accounts.ROLES),
+            ('PUT', 'productos/' + detail, accounts.ADMIN),
+            ('DELETE', 'productos/' + detail, accounts.ADMIN),
+            ('GET', 'clientes/', accounts.ROLES),
+            ('POST', 'clientes/', accounts.ROLES),
+            ('GET', 'ventas/', accounts.ROLES),
+            ('POST', 'ventas/', accounts.ROLES),
+            ('GET', 'compras/', accounts.ADMIN),
+            ('POST', 'compras/', accounts.ADMIN),
+        ]
+        for method, path, allowed in cases:
+            for rol, usuario_obj in (('administrador', self.admin), ('cajero', self.cajero)):
+                with self.subTest(method=method, path=path, rol=rol):
+                    client = APIClient()
+                    client.force_authenticate(user=usuario_obj)
+                    response = client.generic(method, '/api/' + path, data=b'{}', content_type='application/json')
+                    if rol in allowed:
+                        self.assertNotEqual(response.status_code, 403)
+                    else:
+                        self.assertEqual(response.status_code, 403)
+
+    def test_cajero_cannot_change_stock_via_quick_edit(self):
+        client = APIClient()
+        client.force_authenticate(user=self.cajero)
+        response = client.patch(f'/api/productos/{self.product.pk}/', {'stock': 999}, format='json')
+        self.assertEqual(response.status_code, 403)
+        self.assertIn('stock', response.json()['message'])
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 5)
+
+    def test_cajero_can_change_price_via_quick_edit(self):
+        client = APIClient()
+        client.force_authenticate(user=self.cajero)
+        response = client.patch(f'/api/productos/{self.product.pk}/', {'precio': 1500}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.precio, 1500)
+
+    def test_admin_can_change_stock(self):
+        client = APIClient()
+        client.force_authenticate(user=self.admin)
+        response = client.patch(f'/api/productos/{self.product.pk}/', {'stock': 42}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 42)
+
+    def test_request_log_records_authenticated_user(self):
+        token = self.token_for(self.admin)
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer ' + token)
+        self.client.get('/api/productos/')
+        last = RequestLog.objects.filter(path='/api/productos/').latest('id')
+        self.assertEqual(last.usuario_id, self.admin.pk)

@@ -1,0 +1,49 @@
+# Blueprint de Render (opcional): crea la base de datos y el backend con un
+# "New > Blueprint" apuntando a este repo. No contiene secretos: SECRET_KEY se
+# genera sola y las credenciales se piden en el dashboard (sync: false). El
+# frontend NO va aqui: se despliega aparte en un host estatico (ver README).
+databases:
+  - name: papel-y-luna-db
+    plan: free
+    databaseName: papel_y_luna
+    user: papel_y_luna
+
+services:
+  - type: web
+    name: papel-y-luna-backend
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python manage.py migrate --noinput && python manage.py seed && gunicorn backend.wsgi:application --bind 0.0.0.0:$PORT
+    envVars:
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DEBUG
+        value: "false"
+      # Cubre el subdominio *.onrender.com que Render asigna por defecto.
+      # Si agregas un dominio propio, suma ese host (separado por comas).
+      - key: DJANGO_ALLOWED_HOSTS
+        value: .onrender.com
+      - key: DATABASE_URL
+        fromDatabase:
+          name: papel-y-luna-db
+          property: connectionString
+      - key: DB_SSLMODE
+        value: require
+      - key: SESSION_TTL_HOURS
+        value: "12"
+      # URL(es) del frontend desplegado (Vercel/Netlify/GitHub Pages), separadas
+      # por comas, p. ej. https://papel-y-luna.vercel.app. Sin esto, CORS
+      # bloquea al frontend. Se define en el dashboard, no aqui.
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      # Cambia estas credenciales antes de que el equipo empiece a usar el
+      # despliegue real; en el dashboard, no en este archivo.
+      - key: SEED_ADMIN_USER
+        sync: false
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
+      - key: SEED_CAJERO_USER
+        sync: false
+      - key: SEED_CAJERO_PASSWORD
+        sync: false

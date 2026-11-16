@@ -1,21 +1,86 @@
 {
   "info": {
     "name": "Papel y Luna - Actividad 10",
-    "description": "API local Django/PostgreSQL 18. Ejecutar en orden. Crea datos de demostración y documentos contables que se conservan; usar una base de pruebas.",
+    "description": "API local Django/PostgreSQL 18. Ejecutar en orden. Crea datos de demostración y documentos contables que se conservan; usar una base de pruebas. Requiere los usuarios sembrados por \"manage.py seed\" (admin/admin123 por defecto).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
       "value": "http://127.0.0.1:8000"
+    },
+    {
+      "key": "token",
+      "value": ""
     }
   ],
   "item": [
     {
-      "name": "01 Salud PostgreSQL 18",
+      "name": "00 Login administrador",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/auth/login/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"usuario\": \"admin\", \"contrasena\": \"admin123\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Devuelve token y rol\", () => { pm.expect(result.data.token).to.be.a(\"string\"); pm.expect(result.data.usuario.rol).to.equal(\"administrador\"); });",
+              "pm.collectionVariables.set(\"token\", result.data.token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "00b Sin token es 401",
       "request": {
         "method": "GET",
         "header": [],
+        "url": "{{baseUrl}}/api/productos/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 Salud PostgreSQL 18",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
         "url": "{{baseUrl}}/api/health/"
       },
       "event": [
@@ -36,7 +101,12 @@
       "name": "02 GET productos sin campos _id",
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
         "url": "{{baseUrl}}/api/productos/"
       },
       "event": [
@@ -59,6 +129,10 @@
       "request": {
         "method": "POST",
         "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
           {
             "key": "Content-Type",
             "value": "application/json"
@@ -104,6 +178,10 @@
         "method": "POST",
         "header": [
           {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
             "key": "Content-Type",
             "value": "application/json"
           }
@@ -139,6 +217,10 @@
         "method": "POST",
         "header": [
           {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
             "key": "Content-Type",
             "value": "application/json"
           }
@@ -173,6 +255,10 @@
         "method": "POST",
         "header": [
           {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
             "key": "Content-Type",
             "value": "application/json"
           }
@@ -206,6 +292,10 @@
       "request": {
         "method": "POST",
         "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
           {
             "key": "Content-Type",
             "value": "application/json"
@@ -244,6 +334,10 @@
         "method": "PUT",
         "header": [
           {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
             "key": "Content-Type",
             "value": "application/json"
           }
@@ -277,6 +371,10 @@
       "request": {
         "method": "PUT",
         "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
           {
             "key": "Content-Type",
             "value": "application/json"
@@ -312,6 +410,10 @@
         "method": "POST",
         "header": [
           {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
             "key": "Content-Type",
             "value": "application/json"
           }
@@ -342,10 +444,169 @@
       ]
     },
     {
-      "name": "11 Venta abierta",
+      "name": "10a Crear descuento porcentual",
       "request": {
         "method": "POST",
         "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/descuentos/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"Postman {{runId}}\", \"tipo\": \"porcentual\", \"valor\": 10}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.collectionVariables.set(\"discountId\", result.data.id);",
+              "pm.test(\"Tipo y valor guardados\", () => { pm.expect(result.data.tipo).to.equal(\"porcentual\"); pm.expect(result.data.valor).to.equal(10); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10b Validator descuento porcentual > 100",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/descuentos/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"X\", \"tipo\": \"porcentual\", \"valor\": 150}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10c Validator descuento fijo <= 0",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/descuentos/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"X\", \"tipo\": \"fijo\", \"valor\": 0}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10d PATCH descuento (cajero vera solo GET; aqui admin)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/descuentos/{{discountId}}/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"valor\": 15}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Valor actualizado\", () => pm.expect(result.data.valor).to.equal(15));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 Venta abierta con descuento",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
           {
             "key": "Content-Type",
             "value": "application/json"
@@ -354,7 +615,7 @@
         "url": "{{baseUrl}}/api/ventas/",
         "body": {
           "mode": "raw",
-          "raw": "{\"fecha\": \"{{saleDate}}\", \"estado\": \"abierta\", \"metodoPago\": \"Efectivo\", \"valorRecibido\": 5000, \"clienteId\": \"\", \"itemsJson\": \"[{\\\"productoId\\\": \\\"{{productId}}\\\", \\\"cantidad\\\": 2}]\"}",
+          "raw": "{\"fecha\": \"{{saleDate}}\", \"estado\": \"abierta\", \"metodoPago\": \"Efectivo\", \"valorRecibido\": 5000, \"clienteId\": \"\", \"descuentoId\": \"{{discountId}}\", \"itemsJson\": \"[{\\\"productoId\\\": \\\"{{productId}}\\\", \\\"cantidad\\\": 2}]\"}",
           "options": {
             "raw": {
               "language": "json"
@@ -379,7 +640,8 @@
             "exec": [
               "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
               "const result = pm.response.json();",
-              "pm.collectionVariables.set(\"saleId\", result.data.id);"
+              "pm.collectionVariables.set(\"saleId\", result.data.id);",
+              "pm.test(\"Descuento ya calculado en el borrador\", () => { pm.expect(result.data.subtotal).to.equal(2000); pm.expect(result.data.descuentoMonto).to.equal(300); pm.expect(result.data.total).to.equal(1700); });"
             ]
           }
         }
@@ -389,7 +651,12 @@
       "name": "12 Stock intacto en borrador",
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
         "url": "{{baseUrl}}/api/productos/{{productId}}/"
       },
       "event": [
@@ -407,10 +674,14 @@
       ]
     },
     {
-      "name": "13 PUT cerrar venta",
+      "name": "13 PUT cerrar venta (RF-18/RN-08: aplicar+cerrar en un solo paso)",
       "request": {
         "method": "PUT",
         "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
           {
             "key": "Content-Type",
             "value": "application/json"
@@ -419,7 +690,7 @@
         "url": "{{baseUrl}}/api/ventas/{{saleId}}/",
         "body": {
           "mode": "raw",
-          "raw": "{\"fecha\": \"{{saleDate}}\", \"estado\": \"cerrada\", \"metodoPago\": \"Efectivo\", \"valorRecibido\": 5000, \"clienteId\": \"\", \"itemsJson\": \"[{\\\"productoId\\\": \\\"{{productId}}\\\", \\\"cantidad\\\": 2}]\"}",
+          "raw": "{\"fecha\": \"{{saleDate}}\", \"estado\": \"cerrada\", \"metodoPago\": \"Efectivo\", \"valorRecibido\": 5000, \"clienteId\": \"\", \"descuentoId\": \"{{discountId}}\", \"itemsJson\": \"[{\\\"productoId\\\": \\\"{{productId}}\\\", \\\"cantidad\\\": 2}]\"}",
           "options": {
             "raw": {
               "language": "json"
@@ -435,17 +706,22 @@
             "exec": [
               "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
               "const result = pm.response.json();",
-              "pm.test(\"Total calculado en servidor\", () => pm.expect(result.data.total).to.equal(2000));"
+              "pm.test(\"Total con descuento calculado en servidor\", () => { pm.expect(result.data.subtotal).to.equal(2000); pm.expect(result.data.descuentoNombre).to.be.a(\"string\").and.not.empty; pm.expect(result.data.descuentoMonto).to.equal(300); pm.expect(result.data.total).to.equal(1700); });"
             ]
           }
         }
       ]
     },
     {
-      "name": "14 Stock descontado",
+      "name": "14 Stock descontado (el descuento no toca stock)",
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
         "url": "{{baseUrl}}/api/productos/{{productId}}/"
       },
       "event": [
@@ -468,6 +744,10 @@
         "method": "PUT",
         "header": [
           {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
             "key": "Content-Type",
             "value": "application/json"
           }
@@ -475,7 +755,7 @@
         "url": "{{baseUrl}}/api/ventas/{{saleId}}/",
         "body": {
           "mode": "raw",
-          "raw": "{\"fecha\": \"{{saleDate}}\", \"estado\": \"cerrada\", \"metodoPago\": \"Efectivo\", \"valorRecibido\": 5000, \"clienteId\": \"\", \"itemsJson\": \"[{\\\"productoId\\\": \\\"{{productId}}\\\", \\\"cantidad\\\": 2}]\"}",
+          "raw": "{\"fecha\": \"{{saleDate}}\", \"estado\": \"cerrada\", \"metodoPago\": \"Efectivo\", \"valorRecibido\": 5000, \"clienteId\": \"\", \"descuentoId\": \"{{discountId}}\", \"itemsJson\": \"[{\\\"productoId\\\": \\\"{{productId}}\\\", \\\"cantidad\\\": 2}]\"}",
           "options": {
             "raw": {
               "language": "json"
@@ -497,10 +777,15 @@
       ]
     },
     {
-      "name": "16 Reintento no duplica descuento",
+      "name": "16 Reintento no duplica stock",
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
         "url": "{{baseUrl}}/api/productos/{{productId}}/"
       },
       "event": [
@@ -518,10 +803,65 @@
       ]
     },
     {
+      "name": "16a DELETE descuento usado no esta bloqueado (3.9: excepcion a la regla de 409)",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/descuentos/{{discountId}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16b La venta cerrada conserva su copia del descuento tras eliminarlo",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/ventas/{{saleId}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Copia intacta, FK en null\", () => { pm.expect(result.data.descuentoId).to.equal(\"\"); pm.expect(result.data.descuentoMonto).to.equal(300); pm.expect(result.data.total).to.equal(1700); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "17 Compra repone stock",
       "request": {
         "method": "POST",
         "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
           {
             "key": "Content-Type",
             "value": "application/json"
@@ -564,7 +904,12 @@
       "name": "18 Inventario tras compra",
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
         "url": "{{baseUrl}}/api/productos/{{productId}}/"
       },
       "event": [
@@ -585,7 +930,12 @@
       "name": "19 Sanitizacion anidada",
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
         "url": "{{baseUrl}}/api/demo/sanitizacion/"
       },
       "event": [
@@ -606,8 +956,756 @@
       "name": "20 DELETE protege venta cerrada",
       "request": {
         "method": "DELETE",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
         "url": "{{baseUrl}}/api/ventas/{{saleId}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20a Login cajero",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/auth/login/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"usuario\": \"cajero\", \"contrasena\": \"cajero123\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.collectionVariables.set(\"cajeroToken\", result.data.token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20b Cajero no puede corregir (403)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{cajeroToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/ventas/{{saleId}}/corregir/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"itemsJson\": \"[{\\\"productoId\\\": \\\"{{productId}}\\\", \\\"cantidad\\\": 4}]\", \"clienteId\": \"\", \"metodoPago\": \"Nequi\", \"valorRecibido\": 0}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20c Crear cliente para la correccion",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/clientes/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"Correccion {{runId}}\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.collectionVariables.set(\"correctionClientId\", result.data.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20d Admin corrige cantidad y cliente (descuento ya eliminado del catalogo en 16a)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/ventas/{{saleId}}/corregir/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"itemsJson\": \"[{\\\"productoId\\\": \\\"{{productId}}\\\", \\\"cantidad\\\": 4}]\", \"clienteId\": \"{{correctionClientId}}\", \"metodoPago\": \"Nequi\", \"valorRecibido\": 0}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Usa la copia congelada del descuento (15%, no el 10% original ni el catalogo que ya no existe)\", () => { pm.expect(result.data.subtotal).to.equal(4000); pm.expect(result.data.descuentoMonto).to.equal(600); pm.expect(result.data.total).to.equal(3400); });",
+              "pm.test(\"Trazabilidad\", () => { pm.expect(result.data.corregida).to.equal(true); pm.expect(result.data.corregidaPor).to.equal(\"admin\"); });",
+              "pm.test(\"Cliente actualizado y id conservado\", () => { pm.expect(result.data.clienteId).to.equal(pm.collectionVariables.get(\"correctionClientId\")); pm.expect(result.data.id).to.equal(pm.collectionVariables.get(\"saleId\")); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20e Stock ajustado por la diferencia (+2 de la correccion)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/productos/{{productId}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Stock 9 (11 - 2)\", () => pm.expect(result.data.stock).to.equal(9));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20f Stock insuficiente rechaza toda la correccion (sin cambios parciales)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/ventas/{{saleId}}/corregir/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"itemsJson\": \"[{\\\"productoId\\\": \\\"{{productId}}\\\", \\\"cantidad\\\": 999999}]\", \"clienteId\": \"{{correctionClientId}}\", \"metodoPago\": \"Nequi\", \"valorRecibido\": 0}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();",
+              "pm.test(\"Nombra el producto sin stock\", () => pm.expect(result.errors.stock).to.include(\"Cuaderno Postman\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20g Rechazo anterior no dejo cambios parciales",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/productos/{{productId}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Stock sigue en 9\", () => pm.expect(result.data.stock).to.equal(9));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20h Reenvio identico no duplica el movimiento de stock",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/ventas/{{saleId}}/corregir/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"itemsJson\": \"[{\\\"productoId\\\": \\\"{{productId}}\\\", \\\"cantidad\\\": 4}]\", \"clienteId\": \"{{correctionClientId}}\", \"metodoPago\": \"Nequi\", \"valorRecibido\": 0}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20i Reenvio identico: stock sin cambios",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/productos/{{productId}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Stock sigue en 9 (diferencia 0)\", () => pm.expect(result.data.stock).to.equal(9));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20j El PUT/PATCH normal sigue bloqueado tras corregir",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/ventas/{{saleId}}/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"fecha\": \"{{saleDate}}\", \"estado\": \"cerrada\", \"metodoPago\": \"Efectivo\", \"valorRecibido\": 5000, \"clienteId\": \"\", \"descuentoId\": \"\", \"itemsJson\": \"[{\\\"productoId\\\": \\\"{{productId}}\\\", \\\"cantidad\\\": 2}]\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "30a Crear productos para reembolso (A, B, C)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/productos/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"Reembolso A\", \"codigo\": \"RB-A-{{runId}}\", \"categoriaId\": \"{{categoryId}}\", \"precio\": 100, \"costo\": 50, \"stock\": 5, \"seguimientoInventario\": true}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.collectionVariables.set(\"refundProductA\", result.data.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "30b Crear producto B",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/productos/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"Reembolso B\", \"codigo\": \"RB-B-{{runId}}\", \"categoriaId\": \"{{categoryId}}\", \"precio\": 100, \"costo\": 50, \"stock\": 5, \"seguimientoInventario\": true}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.collectionVariables.set(\"refundProductB\", result.data.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "30c Crear producto C",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/productos/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"Reembolso C\", \"codigo\": \"RB-C-{{runId}}\", \"categoriaId\": \"{{categoryId}}\", \"precio\": 101, \"costo\": 50, \"stock\": 5, \"seguimientoInventario\": true}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.collectionVariables.set(\"refundProductC\", result.data.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "30d Crear descuento 15% para reembolso",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/descuentos/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\": \"Reembolso 15% {{runId}}\", \"tipo\": \"porcentual\", \"valor\": 15}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.collectionVariables.set(\"refundDiscountId\", result.data.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "30e Crear venta cerrada: A+B+C con 15% (subtotal 301, total 256)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/ventas/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"fecha\": \"{{refundSaleDate}}\", \"estado\": \"cerrada\", \"metodoPago\": \"Nequi\", \"valorRecibido\": 0, \"clienteId\": \"\", \"descuentoId\": \"{{refundDiscountId}}\", \"itemsJson\": \"[{\\\"productoId\\\": \\\"{{refundProductA}}\\\", \\\"cantidad\\\": 1}, {\\\"productoId\\\": \\\"{{refundProductB}}\\\", \\\"cantidad\\\": 1}, {\\\"productoId\\\": \\\"{{refundProductC}}\\\", \\\"cantidad\\\": 1}]\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"refundSaleDate\", new Date().toISOString());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.collectionVariables.set(\"refundSaleId\", result.data.id);",
+              "pm.test(\"subtotal 301, descuento 45, total 256\", () => { pm.expect(result.data.subtotal).to.equal(301); pm.expect(result.data.descuentoMonto).to.equal(45); pm.expect(result.data.total).to.equal(256); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "30f Cajero no puede reembolsar (403)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{cajeroToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/ventas/{{refundSaleId}}/reembolsos/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"itemsJson\": \"[{\\\"productoId\\\": \\\"{{refundProductA}}\\\", \\\"cantidad\\\": 1, \\\"retornaInventario\\\": true}]\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "30g Reembolso parcial de A (monto proporcional: 100 * 256/301 = 85)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/ventas/{{refundSaleId}}/reembolsos/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"itemsJson\": \"[{\\\"productoId\\\": \\\"{{refundProductA}}\\\", \\\"cantidad\\\": 1, \\\"retornaInventario\\\": true}]\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.test(\"Estado parcial y monto 85\", () => { pm.expect(result.data.estadoReembolso).to.equal(\"parcial\"); pm.expect(result.data.reembolsos[0].monto).to.equal(85); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "30h Pedir de nuevo A (ya no queda disponible) rechazado",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/ventas/{{refundSaleId}}/reembolsos/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"itemsJson\": \"[{\\\"productoId\\\": \\\"{{refundProductA}}\\\", \\\"cantidad\\\": 1, \\\"retornaInventario\\\": true}]\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "30i Reembolso total de lo restante (B+C): suma exacta al total (256)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/ventas/{{refundSaleId}}/reembolsos/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"total\": true, \"itemsJson\": \"[]\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.test(\"Estado total y suma exacta sin deriva de redondeo\", () => { pm.expect(result.data.estadoReembolso).to.equal(\"total\"); pm.expect(result.data.totalReembolsado).to.equal(256); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "30j Corregir queda bloqueada (409) tras el reembolso",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/ventas/{{refundSaleId}}/corregir/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"itemsJson\": \"[{\\\"productoId\\\": \\\"{{refundProductA}}\\\", \\\"cantidad\\\": 1}, {\\\"productoId\\\": \\\"{{refundProductB}}\\\", \\\"cantidad\\\": 1}, {\\\"productoId\\\": \\\"{{refundProductC}}\\\", \\\"cantidad\\\": 1}]\", \"metodoPago\": \"Nequi\", \"valorRecibido\": 0, \"clienteId\": \"\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
       },
       "event": [
         {
@@ -626,7 +1724,12 @@
       "name": "21 DELETE protege categoria referenciada",
       "request": {
         "method": "DELETE",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
         "url": "{{baseUrl}}/api/categorias/{{categoryId}}/"
       },
       "event": [
@@ -647,6 +1750,10 @@
       "request": {
         "method": "POST",
         "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
           {
             "key": "Content-Type",
             "value": "application/json"
@@ -683,6 +1790,10 @@
         "method": "PUT",
         "header": [
           {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
             "key": "Content-Type",
             "value": "application/json"
           }
@@ -717,6 +1828,10 @@
         "method": "PUT",
         "header": [
           {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
             "key": "Content-Type",
             "value": "application/json"
           }
@@ -749,7 +1864,12 @@
       "name": "25 DELETE cliente",
       "request": {
         "method": "DELETE",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
         "url": "{{baseUrl}}/api/clientes/{{clientId}}/"
       },
       "event": [
@@ -769,7 +1889,12 @@
       "name": "26 GET confirma eliminacion",
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
         "url": "{{baseUrl}}/api/clientes/{{clientId}}/"
       },
       "event": [
@@ -789,7 +1914,12 @@
       "name": "27 Logging registra GET POST PUT DELETE",
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
         "url": "{{baseUrl}}/api/request-logs/"
       },
       "event": [

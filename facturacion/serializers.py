@@ -4,6 +4,18 @@ from django.forms.models import model_to_dict
 from .models import Producto, Venta, Compra
 
 
+def reembolso_json(reembolso):
+    # nombre de i.linea (el DetalleVenta original), no del catalogo vigente:
+    # el reembolso muestra el nombre que tenia el producto cuando se vendio,
+    # igual que el resto de instantaneas del proyecto (precio/costo en
+    # DetalleVenta/DetalleCompra).
+    items = reembolso.items.select_related('linea').order_by('id')
+    return {'id': str(reembolso.pk), 'fecha': reembolso.fecha.isoformat(), 'usuario': reembolso.usuario_nombre,
+            'monto': reembolso.monto, 'esTotal': reembolso.es_total,
+            'items': [{'productoId': str(i.producto_id), 'nombre': i.linea.nombre, 'cantidad': i.cantidad,
+                      'retornaInventario': i.retorna_inventario, 'monto': i.monto} for i in items]}
+
+
 def record_json(record):
     if isinstance(record, Producto):
         return {'id': str(record.pk), 'codigo': record.codigo, 'nombre': record.nombre,
@@ -18,9 +30,20 @@ def record_json(record):
         if isinstance(record, Venta):
             result.update(estado=record.estado, clienteId=str(record.cliente_id or ''),
                           cliente_id=str(record.cliente_id or ''), metodoPago=record.metodo_pago,
-                          subtotal=record.subtotal, valorRecibido=record.valor_recibido,
-                          cambio=record.cambio, actualizadoEn=record.actualizado_en.isoformat())
+                          subtotal=record.subtotal, descuentoId=str(record.descuento_id or ''),
+                          descuento_id=str(record.descuento_id or ''), descuentoNombre=record.descuento_nombre,
+                          descuentoTipo=record.descuento_tipo, descuentoValor=record.descuento_valor,
+                          descuentoMonto=record.descuento_monto, valorRecibido=record.valor_recibido,
+                          cambio=record.cambio, actualizadoEn=record.actualizado_en.isoformat(),
+                          corregida=record.corregida, corregidaPor=record.corregida_por_nombre or None,
+                          corregidaEn=record.corregida_en.isoformat() if record.corregida_en else None,
+                          estadoReembolso=record.estado_reembolso, totalReembolsado=record.total_reembolsado,
+                          reembolsos=[reembolso_json(r) for r in record.reembolsos.order_by('fecha')])
         else:
             result.update(proveedorId=str(record.proveedor_id), proveedor_id=str(record.proveedor_id))
         return result
     return {'id': str(record.pk), **model_to_dict(record, exclude=['id'])}
+
+
+def usuario_json(usuario):
+    return {'id': str(usuario.pk), 'usuario': usuario.usuario, 'rol': usuario.rol}

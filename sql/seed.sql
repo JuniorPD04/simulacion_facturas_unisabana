@@ -12,4 +12,8 @@ INSERT INTO productos (id, codigo, nombre, categoria_id, precio, costo, seguimie
 ('40000000-0000-4000-8000-000000000001', 'PL-001', 'Cuaderno cuadriculado', '10000000-0000-4000-8000-000000000001', 8500, 5000, true, 30),
 ('40000000-0000-4000-8000-000000000002', 'PL-002', 'Lapicero azul', '10000000-0000-4000-8000-000000000002', 2000, 900, true, 100),
 ('40000000-0000-4000-8000-000000000003', 'PL-003', 'Impresion blanco y negro', '10000000-0000-4000-8000-000000000003', 300, 100, false, 0) ON CONFLICT DO NOTHING;
+-- Descuentos de demostracion (3.6): uno porcentual y uno de valor fijo.
+INSERT INTO descuentos (id, nombre, tipo, valor) VALUES
+('60000000-0000-4000-8000-000000000001', 'Demo 10%', 'porcentual', 10),
+('60000000-0000-4000-8000-000000000002', 'Demo $5.000', 'fijo', 5000) ON CONFLICT DO NOTHING;
 INSERT INTO seed_history (version, applied_at) VALUES ('initial-v1', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING;

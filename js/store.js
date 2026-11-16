@@ -9,7 +9,13 @@
   var clone = function (value) { return JSON.parse(JSON.stringify(value)); };
   var total = function (items, key) { return items.reduce(function (sum, i) { return sum + i[key] * i.cantidad; }, 0); };
   function emptySale() {
-    return { id: crypto.randomUUID(), fecha: new Date().toISOString(), estado: "abierta", clienteId: "", metodoPago: "Efectivo", valorRecibido: "", items: [], paso: "items" };
+    return { id: crypto.randomUUID(), fecha: new Date().toISOString(), estado: "abierta", clienteId: "", metodoPago: "Efectivo", valorRecibido: "", descuentoId: "", items: [], paso: "items" };
+  }
+  // Unica formula de descuento, reutilizada por el store y cubierta por
+  // tests/mvp2.test.cjs; el backend vuelve a calcular lo mismo y es quien manda.
+  function discountAmount(subtotal, descuento) {
+    if (!descuento) return 0;
+    return descuento.tipo === "porcentual" ? Math.floor(subtotal * descuento.valor / 100) : descuento.valor;
   }
   function normalize(resource, row) {
     var result = Object.assign({}, row, { id: String(row.id) });
@@ -37,12 +43,21 @@
     busy = true;
     try { return await fn(); } finally { busy = false; }
   }
+  // El cajero no tiene GET en proveedores/compras (ver facturacion.accounts.PERMISSIONS);
+  // pedirlos igual tumbaria toda la carga por Promise.all. Solo se piden los
+  // recursos que el rol puede leer; los demas quedan vacios.
+  function readableResources() {
+    if (PYL.auth.isAdmin()) return PYL.api.resources;
+    return PYL.api.resources.filter(function (r) { return r !== "proveedores" && r !== "compras"; });
+  }
   async function load() {
+    var readable = readableResources();
     // Commit the snapshot only after every resource has loaded successfully.
-    var rows = await Promise.all(PYL.api.resources.map(async function (r) {
+    var rows = await Promise.all(readable.map(async function (r) {
       return [r, (await PYL.api.apiGet(r)).map(function (row) { return normalize(r, row); })];
     }));
     rows.forEach(function (pair) { state[pair[0]] = pair[1]; });
+    PYL.api.resources.filter(function (r) { return !readable.includes(r); }).forEach(function (r) { state[r] = []; });
     inventoryFresh = true;
   }
   function productData(data, id) {
@@ -68,9 +83,51 @@
     var line = currentSale.items.find(function (i) { return i.productoId === product.id; });
     return Math.max(0, product.stock - (line ? line.cantidad : 0));
   }
+  function appliedDiscount() {
+    return currentSale.descuentoId ? get("descuentos", currentSale.descuentoId) : null;
+  }
+  // Modo correccion (3.4/RF-50): estado APARTE de currentSale a proposito, para
+  // no perder un ticket en curso al entrar a corregir una venta cerrada.
+  var correction = null;
+  function correctionSubtotalAmount() { return total(correction.items, "precio"); }
+  function correctionDiscountAmountValue() { return correction.descuento ? discountAmount(correctionSubtotalAmount(), correction.descuento) : 0; }
+  function correctionNetTotalValue() { return correctionSubtotalAmount() - correctionDiscountAmountValue(); }
+  // Reembolsos (3.5/RF-60..65): estado APARTE, igual que correction, para no
+  // perder un ticket en curso. refundDraft.id se genera UNA vez al abrir y se
+  // reutiliza en reintentos del mismo envio, igual que la idempotencia del
+  // backend (create_refund).
+  var refundDraft = null;
+  function refundedByProduct(venta) {
+    var totals = {};
+    (venta.reembolsos || []).forEach(function (r) {
+      r.items.forEach(function (i) { totals[i.productoId] = (totals[i.productoId] || 0) + i.cantidad; });
+    });
+    return totals;
+  }
+  // Vista previa informativa: replica la formula del backend (acumulado
+  // global de la venta, sin deriva de redondeo). El backend vuelve a
+  // calcular todo al guardar y es quien manda.
+  function refundPreviewTotal() {
+    var venta = get("ventas", refundDraft.ventaId), subtotal = venta.subtotal, netTotal = venta.total;
+    var running = refundDraft.lines.reduce(function (sum, l) { return sum + l.precio * l.yaReembolsado; }, 0);
+    var floorAmount = function (acc) { return subtotal === 0 ? 0 : Math.floor(acc * netTotal / subtotal); };
+    var amount = 0;
+    refundDraft.lines.forEach(function (l) {
+      if (!l.cantidad) return;
+      var before = floorAmount(running);
+      running += l.precio * l.cantidad;
+      amount += floorAmount(running) - before;
+    });
+    return amount;
+  }
   function saleRecord(status) {
     if (!currentSale.items.length) throw new Error("Agrega al menos un producto.");
-    var amount = total(currentSale.items, "precio");
+    var subtotal = total(currentSale.items, "precio");
+    var descuento = appliedDiscount();
+    if (currentSale.descuentoId && !descuento) throw new Error("El descuento ya no existe. Quitalo del ticket.");
+    var descuentoMonto = discountAmount(subtotal, descuento);
+    if (descuento && descuentoMonto > subtotal) throw new Error('El descuento "' + descuento.nombre + '" supera el subtotal. Quitalo o ajusta el ticket.');
+    var amount = subtotal - descuentoMonto;
     var received = currentSale.metodoPago === "Efectivo" ? Number(currentSale.valorRecibido) : currentSale.metodoPago === "Nequi" ? amount : 0;
     if (!payments.includes(currentSale.metodoPago)) throw new Error("Selecciona un metodo de pago.");
     if (currentSale.clienteId && !get("clientes", currentSale.clienteId)) throw new Error("El cliente ya no existe.");
@@ -85,12 +142,18 @@
         validateStock(p, i.cantidad);
       });
     }
-    return {
+    var record = {
       id: currentSale.id, fecha: currentSale.fecha, estado: status, clienteId: currentSale.clienteId,
-      metodoPago: currentSale.metodoPago, subtotal: amount, total: amount,
+      metodoPago: currentSale.metodoPago, subtotal: subtotal, total: amount,
       valorRecibido: Number.isFinite(received) ? received : 0, cambio: status === "cerrada" && currentSale.metodoPago === "Efectivo" ? received - amount : 0,
       itemsJson: JSON.stringify(currentSale.items), actualizadoEn: new Date().toISOString()
     };
+    // Solo se manda si hay (o hubo) descuento: una venta sin descuento nunca lo
+    // menciona, por compatibilidad con el backend historico simulado que no
+    // conoce este campo (ver tests/mvp2.test.cjs y apps-script.gs).
+    var saved = get("ventas", currentSale.id);
+    if (currentSale.descuentoId || (saved && saved.descuentoId)) record.descuentoId = currentSale.descuentoId;
+    return record;
   }
   async function saveSale(status) {
     return exclusive(async function () {
@@ -121,9 +184,23 @@
     getCurrentSale: function () { return currentSale; },
     newSale: function () { currentSale = emptySale(); },
     clearSale: function () { currentSale = emptySale(); },
-    setSaleField: function (field, value) { if (["clienteId", "metodoPago", "valorRecibido", "paso"].includes(field)) currentSale[field] = value; },
+    setSaleField: function (field, value) { if (["clienteId", "metodoPago", "valorRecibido", "paso", "descuentoId"].includes(field)) currentSale[field] = value; },
     currentTotal: function () { return total(currentSale.items, "precio"); },
     lineSubtotal: function (i) { return i.precio * i.cantidad; },
+    discountAmount: discountAmount,
+    getAppliedDiscount: function () { var d = appliedDiscount(); return d ? clone(d) : null; },
+    currentDiscountAmount: function () { return discountAmount(this.currentTotal(), appliedDiscount()); },
+    // Vista previa: el backend vuelve a calcular todo al guardar/cerrar.
+    currentNetTotal: function () { return this.currentTotal() - this.currentDiscountAmount(); },
+    discountInvalid: function () { return this.currentNetTotal() < 0; },
+    applyDiscount: function (id) {
+      var descuento = get("descuentos", id);
+      if (!descuento) throw new Error("El descuento no existe.");
+      var previous = appliedDiscount();
+      currentSale.descuentoId = id;
+      return previous && previous.id !== id ? previous.nombre : null;
+    },
+    removeDiscount: function () { currentSale.descuentoId = ""; },
     availableStock: availableStock,
     suggestCode: function () { var max = state.productos.reduce(function (n, p) { var m = p.codigo.match(/(\d+)$/); return Math.max(n, m ? Number(m[1]) : 0); }, 0); return "PL-" + PYL.utils.pad(max + 1, 3); },
     addItem: function (id, quantity) {
@@ -175,13 +252,130 @@
         return put(r, await PYL.api.apiPost(r, id ? "update" : "create", value));
       });
     },
+    saveDiscount: function (data, id) {
+      return exclusive(async function () {
+        var value = {
+          id: id || crypto.randomUUID(), nombre: String(data.nombre || "").trim(),
+          tipo: data.tipo, valor: Number(data.valor)
+        };
+        if (!value.nombre) throw new Error("El nombre es obligatorio.");
+        if (!["porcentual", "fijo"].includes(value.tipo)) throw new Error("Selecciona un tipo de descuento valido.");
+        if (!Number.isInteger(value.valor) || value.valor <= 0) throw new Error("El valor debe ser un entero mayor que cero.");
+        if (value.tipo === "porcentual" && value.valor > 100) throw new Error("El descuento porcentual debe estar entre 1 y 100.");
+        return put("descuentos", await PYL.api.apiPost("descuentos", id ? "update" : "create", value));
+      });
+    },
     deleteRecord: function (r, id) {
       return exclusive(async function () {
         if (r === "productos" && currentSale.items.some(function (i) { return i.productoId === id; })) throw new Error("El producto esta en la venta en curso. Quitalo del ticket primero.");
         if (r === "clientes" && currentSale.clienteId === id) throw new Error("El cliente esta asociado a la venta en curso.");
+        if (r === "descuentos" && currentSale.descuentoId === id) throw new Error("El descuento esta aplicado en la venta en curso. Quitalo del ticket primero.");
         await PYL.api.apiPost(r, "delete", { id: id });
         state[r] = state[r].filter(function (row) { return row.id !== id; });
         if (r === "ventas" && currentSale.id === id) currentSale = emptySale();
+      });
+    },
+    startCorrection: function (ventaId) {
+      var venta = get("ventas", ventaId);
+      if (!venta || venta.estado !== "cerrada") throw new Error("Solo se pueden corregir ventas cerradas.");
+      correction = {
+        ventaId: ventaId, clienteId: venta.clienteId || "", metodoPago: venta.metodoPago,
+        valorRecibido: venta.metodoPago === "Efectivo" ? venta.valorRecibido : "",
+        items: clone(venta.items),
+        descuento: venta.descuentoNombre ? { nombre: venta.descuentoNombre, tipo: venta.descuentoTipo, valor: venta.descuentoValor } : null
+      };
+    },
+    cancelCorrection: function () { correction = null; },
+    isCorrecting: function () { return correction !== null; },
+    getCorrection: function () { return correction ? clone(correction) : null; },
+    setCorrectionField: function (field, value) { if (["clienteId", "metodoPago", "valorRecibido"].includes(field)) correction[field] = value; },
+    correctionSubtotal: correctionSubtotalAmount,
+    correctionDiscountAmount: correctionDiscountAmountValue,
+    correctionNetTotal: correctionNetTotalValue,
+    correctionInvalid: function () { return correctionNetTotalValue() < 0; },
+    correctionAddItem: function (id, quantity) {
+      var p = get("productos", id), qty = Number(quantity);
+      if (!p) throw new Error("El producto no existe.");
+      if (!Number.isInteger(qty) || qty < 1) throw new Error("La cantidad debe ser un entero mayor que cero.");
+      var line = correction.items.find(function (i) { return i.productoId === id; });
+      if (line) line.cantidad += qty; else correction.items.push(snapshot(p, qty));
+    },
+    correctionUpdateItemQty: function (id, quantity) {
+      var qty = Number(quantity);
+      if (!Number.isInteger(qty) || qty < 1) throw new Error("La cantidad debe ser un entero mayor que cero.");
+      var line = correction.items.find(function (i) { return i.productoId === id; });
+      if (!line) throw new Error("El producto no esta en la correccion.");
+      line.cantidad = qty;
+    },
+    correctionRemoveItem: function (id) { correction.items = correction.items.filter(function (i) { return i.productoId !== id; }); },
+    registerCorrection: function () {
+      return exclusive(async function () {
+        if (!correction.items.length) throw new Error("Agrega al menos un producto.");
+        if (!payments.includes(correction.metodoPago)) throw new Error("Selecciona un metodo de pago.");
+        if (correction.clienteId && !get("clientes", correction.clienteId)) throw new Error("El cliente ya no existe.");
+        if (correction.metodoPago === "Debe" && !correction.clienteId) throw new Error("Selecciona un cliente para el pago Debe.");
+        if (correctionNetTotalValue() < 0) throw new Error('El descuento "' + correction.descuento.nombre + '" supera el nuevo subtotal. Ajusta los productos.');
+        var netTotal = correctionNetTotalValue();
+        var received = correction.metodoPago === "Efectivo" ? Number(correction.valorRecibido) : netTotal;
+        if (correction.metodoPago === "Efectivo" && (correction.valorRecibido === "" || !Number.isInteger(received) || received < 0)) throw new Error("El valor recibido debe ser un numero entero no negativo.");
+        if (correction.metodoPago === "Efectivo" && received < netTotal) throw new Error("El valor recibido debe cubrir el total de la venta.");
+        var payload = {
+          itemsJson: JSON.stringify(correction.items), clienteId: correction.clienteId,
+          metodoPago: correction.metodoPago, valorRecibido: Number.isFinite(received) ? received : 0
+        };
+        var saved = put("ventas", await PYL.api.apiCorrectSale(correction.ventaId, payload));
+        try { state.productos = (await PYL.api.apiGet("productos")).map(function (p) { return normalize("productos", p); }); }
+        catch (error) { inventoryFresh = false; }
+        correction = null;
+        return clone(saved);
+      });
+    },
+    startRefund: function (ventaId) {
+      var venta = get("ventas", ventaId);
+      if (!venta || venta.estado !== "cerrada") throw new Error("Solo se pueden reembolsar ventas cerradas.");
+      var refunded = refundedByProduct(venta);
+      refundDraft = {
+        ventaId: ventaId, id: crypto.randomUUID(),
+        lines: venta.items.map(function (i) {
+          var yaReembolsado = refunded[i.productoId] || 0;
+          return { productoId: i.productoId, nombre: i.nombre, precio: i.precio, vendido: i.cantidad,
+                  yaReembolsado: yaReembolsado, disponible: Math.max(0, i.cantidad - yaReembolsado),
+                  cantidad: 0, retornaInventario: true };
+        })
+      };
+    },
+    cancelRefund: function () { refundDraft = null; },
+    isRefunding: function () { return refundDraft !== null; },
+    getRefund: function () { return refundDraft ? clone(refundDraft) : null; },
+    refundHasPending: function () { return refundDraft.lines.some(function (l) { return l.disponible > 0; }); },
+    refundSetLineQty: function (productoId, quantity) {
+      var line = refundDraft.lines.find(function (l) { return l.productoId === productoId; });
+      if (!line) throw new Error("El producto no esta en esta venta.");
+      var qty = Number(quantity);
+      if (!Number.isInteger(qty) || qty < 0) throw new Error("La cantidad debe ser un entero no negativo.");
+      line.cantidad = Math.min(qty, line.disponible);
+    },
+    refundSetLineRetorna: function (productoId, value) {
+      var line = refundDraft.lines.find(function (l) { return l.productoId === productoId; });
+      if (line) line.retornaInventario = Boolean(value);
+    },
+    refundFillAll: function () { refundDraft.lines.forEach(function (l) { l.cantidad = l.disponible; }); },
+    refundPreviewTotal: refundPreviewTotal,
+    registerRefund: function () {
+      return exclusive(async function () {
+        var selected = refundDraft.lines.filter(function (l) { return l.cantidad > 0; });
+        if (!selected.length) throw new Error("Selecciona al menos un producto para reembolsar.");
+        var payload = {
+          id: refundDraft.id, total: false,
+          itemsJson: JSON.stringify(selected.map(function (l) {
+            return { productoId: l.productoId, cantidad: l.cantidad, retornaInventario: l.retornaInventario };
+          }))
+        };
+        var saved = put("ventas", await PYL.api.apiCreateRefund(refundDraft.ventaId, payload));
+        try { state.productos = (await PYL.api.apiGet("productos")).map(function (p) { return normalize("productos", p); }); }
+        catch (error) { inventoryFresh = false; }
+        refundDraft = null;
+        return clone(saved);
       });
     },
     createPurchase: function (purchase) {
