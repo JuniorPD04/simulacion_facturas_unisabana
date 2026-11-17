@@ -321,7 +321,22 @@ powershell -ExecutionPolicy Bypass -File scripts/package.ps1
 
 ## Despliegue
 
-Backend (Django + PostgreSQL) y frontend (estático) van en plataformas distintas; se comunican por HTTP con CORS, no por sesión de Django ni cookies.
+### Desplegar todo en Render
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/JuniorPD04/simulacion_facturas_unisabana)
+
+1. Sube a GitHub los cambios de `render.yaml` y este README antes de usar el botón.
+2. Pulsa **Deploy to Render**, inicia sesión y autoriza el acceso al repositorio si Render lo solicita.
+3. Define `SEED_ADMIN_PASSWORD` y `SEED_CAJERO_PASSWORD` y confirma la creación del Blueprint.
+4. Al terminar, abre la URL del servicio `papel-y-luna-backend` e inicia sesión con `admin` o `cajero` y la contraseña que definiste.
+
+El Blueprint crea PostgreSQL **18** y un servicio que sirve frontend y API en la misma URL. Genera `DJANGO_SECRET_KEY`, conecta `DATABASE_URL`, aplica migraciones y carga los datos y usuarios iniciales automáticamente. Conserva `apiBaseUrl: "/api/"` en `js/config.js`; no requiere configurar CORS ni otro hosting. Las contraseñas iniciales solo se aplican en el primer sembrado de usuarios.
+
+Se usan planes gratuitos: el servicio se suspende tras 15 minutos sin tráfico y la base gratuita vence a los 30 días. Para conservar los datos más allá de ese plazo, cambia la base a un plan de pago. Los despliegues automáticos están desactivados; para publicar cambios posteriores usa **Manual Deploy** en Render.
+
+Consulta [Deploy to Render](https://render.com/docs/deploy-to-render), la [referencia de Blueprints](https://render.com/docs/blueprint-spec) y los [límites gratuitos](https://render.com/docs/free).
+
+También puedes alojar el frontend por separado; en ese caso se comunica con la API por HTTP con CORS, como se describe más abajo.
 
 ### Variables de entorno
 
@@ -340,7 +355,7 @@ Backend (Django + PostgreSQL) y frontend (estático) van en plataformas distinta
 
 ### Backend en Render (con base de datos)
 
-**Opción A — Blueprint:** en Render, *New → Blueprint*, apunta al repositorio (usa `render.yaml`): crea la base de datos Postgres y el servicio web, genera `DJANGO_SECRET_KEY` solo, y conecta `DATABASE_URL` automáticamente. Completa en el dashboard las variables marcadas como manuales (`CORS_ALLOWED_ORIGINS`, `SEED_ADMIN_PASSWORD`, etc. — no están en el archivo).
+**Opción A — Blueprint:** usa el botón anterior o, en Render, *New → Blueprint* y apunta al repositorio (usa `render.yaml`). Completa las dos contraseñas iniciales cuando Render las solicite. El frontend también queda disponible en el servicio web; solo configura `CORS_ALLOWED_ORIGINS` si decides alojarlo en otro dominio.
 
 **Opción B — manual:** *New → PostgreSQL* (anota su "Internal/External Database URL"), luego *New → Web Service* apuntando al repo, con *Build Command* `pip install -r requirements.txt` y *Start Command* la del `Procfile` (migra, siembra usuarios una sola vez y recién ahí arranca `gunicorn`). Agrega las variables de la tabla anterior.
 
