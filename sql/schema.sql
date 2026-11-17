@@ -185,4 +185,18 @@ ALTER TABLE "detalle_reembolsos" ADD CONSTRAINT "detalle_reembolsos_reembolso_id
 CREATE INDEX "detalle_reembolsos_linea_id_e81487e5" ON "detalle_reembolsos" ("linea_id");
 CREATE INDEX "detalle_reembolsos_producto_id_5b594698" ON "detalle_reembolsos" ("producto_id");
 CREATE INDEX "detalle_reembolsos_reembolso_id_2b2027ee" ON "detalle_reembolsos" ("reembolso_id");
+--
+-- Migración 0006_faltante: faltantes y demanda no atendida (agotados y productos no registrados).
+--
+CREATE TABLE "faltantes" ("id" uuid NOT NULL PRIMARY KEY, "tipo" varchar(20) NOT NULL, "nombre" varchar(150) NOT NULL, "nombre_normalizado" varchar(150) NOT NULL, "cantidad_solicitada" integer NOT NULL CHECK ("cantidad_solicitada" >= 0), "fecha" timestamp with time zone NOT NULL, "observacion" varchar(300) NOT NULL, "estado" varchar(20) NOT NULL, "usuario_nombre" varchar(60) NOT NULL, "resuelto_en" timestamp with time zone NULL, "producto_id" uuid NULL, "proveedor_id" uuid NULL, "resuelto_por_id" uuid NULL, "usuario_id" uuid NULL, CONSTRAINT "faltante_cantidad_positiva" CHECK ("cantidad_solicitada" > 0), CONSTRAINT "faltante_tipo_valido" CHECK ("tipo" IN ('agotado', 'no_registrado')), CONSTRAINT "faltante_estado_valido" CHECK ("estado" IN ('pendiente', 'resuelto')));
+ALTER TABLE "faltantes" ADD CONSTRAINT "faltantes_producto_id_5a0b9ce8_fk_productos_id" FOREIGN KEY ("producto_id") REFERENCES "productos" ("id") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "faltantes" ADD CONSTRAINT "faltantes_proveedor_id_bf0bf55a_fk_proveedores_id" FOREIGN KEY ("proveedor_id") REFERENCES "proveedores" ("id") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "faltantes" ADD CONSTRAINT "faltantes_resuelto_por_id_8e422010_fk_usuarios_id" FOREIGN KEY ("resuelto_por_id") REFERENCES "usuarios" ("id") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "faltantes" ADD CONSTRAINT "faltantes_usuario_id_1935e8df_fk_usuarios_id" FOREIGN KEY ("usuario_id") REFERENCES "usuarios" ("id") DEFERRABLE INITIALLY DEFERRED;
+CREATE INDEX "faltantes_nombre_normalizado_a50f0b8e" ON "faltantes" ("nombre_normalizado");
+CREATE INDEX "faltantes_nombre_normalizado_a50f0b8e_like" ON "faltantes" ("nombre_normalizado" varchar_pattern_ops);
+CREATE INDEX "faltantes_producto_id_5a0b9ce8" ON "faltantes" ("producto_id");
+CREATE INDEX "faltantes_proveedor_id_bf0bf55a" ON "faltantes" ("proveedor_id");
+CREATE INDEX "faltantes_resuelto_por_id_8e422010" ON "faltantes" ("resuelto_por_id");
+CREATE INDEX "faltantes_usuario_id_1935e8df" ON "faltantes" ("usuario_id");
 COMMIT;

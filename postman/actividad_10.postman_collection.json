@@ -1721,6 +1721,596 @@
       ]
     },
     {
+      "name": "31a Registrar faltante no registrado (Cofias)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/faltantes/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"tipo\": \"no_registrado\", \"nombre\": \"Cofias {{runId}}\", \"cantidadSolicitada\": 3, \"observacion\": \"Pidieron azules\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.collectionVariables.set(\"faltanteId\", result.data.id);",
+              "pm.test(\"Queda pendiente y guarda el usuario\", () => { pm.expect(result.data.estado).to.equal(\"pendiente\"); pm.expect(result.data.usuario).to.equal(\"admin\"); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "31b Registrar de nuevo el mismo nombre con otra forma (cofia, tilde y plural)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/faltantes/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"tipo\": \"no_registrado\", \"nombre\": \"COFÍA {{runId}}\", \"cantidadSolicitada\": 2}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "31c Registrar agotado de un producto existente",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/faltantes/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"tipo\": \"agotado\", \"productoId\": \"{{productId}}\", \"cantidadSolicitada\": 1, \"proveedorId\": \"{{providerId}}\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();",
+              "pm.test(\"Copia el nombre del producto\", () => pm.expect(result.data.nombre).to.equal(\"Cuaderno Postman\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "31d Agotado sin producto rechazado (400)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/faltantes/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"tipo\": \"agotado\", \"cantidadSolicitada\": 1}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "31e Cantidad cero rechazada (400)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/faltantes/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"tipo\": \"no_registrado\", \"nombre\": \"X\", \"cantidadSolicitada\": 0}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "31f Cajero puede registrar un faltante",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{cajeroToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/faltantes/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"tipo\": \"no_registrado\", \"nombre\": \"Tijeras {{runId}}\", \"cantidadSolicitada\": 1}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "31g Listar con filtro por tipo",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/faltantes/?tipo=no_registrado"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Solo no registrados\", () => result.data.forEach(row => pm.expect(row.tipo).to.equal(\"no_registrado\")));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "31h Filtro invalido rechazado (400)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/faltantes/?tipo=otro"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "31i Resumen para compras agrupa Cofias/COFÍA como un solo producto",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/faltantes/resumen/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "const grupo = result.data.find(row => row.nombreNormalizado === \"cofia \" + pm.collectionVariables.get(\"runId\"));",
+              "pm.test(\"Agrupado: 2 veces, 5 unidades\", () => { pm.expect(grupo).to.exist; pm.expect(grupo.vecesSolicitado).to.equal(2); pm.expect(grupo.cantidadTotal).to.equal(5); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "31j Resolver faltante (registra quien y cuando)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/faltantes/{{faltanteId}}/resolver/",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Resuelto con usuario y fecha\", () => { pm.expect(result.data.estado).to.equal(\"resuelto\"); pm.expect(result.data.resueltoPor).to.equal(\"admin\"); pm.expect(result.data.resueltoEn).to.be.a(\"string\"); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "31k Resolver otra vez es seguro",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/faltantes/{{faltanteId}}/resolver/",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "31l Faltantes no se pueden eliminar",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/faltantes/{{faltanteId}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32a Reporte de ventas (admin)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/reportes/ventas/?desde=2000-01-01&hasta=2999-12-31"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Totales y 3 metodos de pago\", () => { pm.expect(result.data.totalNeto).to.equal(result.data.totalVendido - result.data.totalReembolsado); pm.expect(result.data.porMetodoPago.length).to.equal(3); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32b Productos mas vendidos con limite",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/reportes/productos-mas-vendidos/?desde=2000-01-01&hasta=2999-12-31&limite=3"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Maximo 3 productos\", () => pm.expect(result.data.productos.length).to.be.at.most(3));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32c Reporte de compras",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/reportes/compras/?desde=2000-01-01&hasta=2999-12-31"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Tiene totales por proveedor\", () => { pm.expect(result.data.porProveedor).to.be.an(\"array\"); pm.expect(result.data.compras).to.be.an(\"array\"); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32d Faltantes frecuentes (rango opcional)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/reportes/faltantes/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Lista de faltantes\", () => pm.expect(result.data.faltantes).to.be.an(\"array\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32e Rango invertido responde 400",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/reportes/ventas/?desde=2026-11-10&hasta=2026-11-01"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32f Falta una fecha responde 400",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/reportes/ventas/?desde=2026-11-10"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32g Cajero no puede ver reportes",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{cajeroToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/reportes/ventas/?desde=2000-01-01&hasta=2999-12-31"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "21 DELETE protege categoria referenciada",
       "request": {
         "method": "DELETE",

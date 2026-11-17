@@ -1,7 +1,8 @@
 """Reglas de negocio y transacciones; los controladores no modifican inventario."""
 import uuid
+from datetime import datetime, time, timedelta
 from django.db import connection, transaction
-from django.db.models import Sum
+from django.db.models import BigIntegerField, Count, F, Sum
 from django.utils import timezone
 from rest_framework.exceptions import NotFound, ValidationError
 from .errors import Conflict
@@ -9,7 +10,8 @@ from .models import (Categoria, Cliente, Proveedor, Producto, Descuento, Venta, 
                      Reembolso, DetalleReembolso, Faltante)
 from .validators import (CategoriaValidator, ClienteValidator, ProveedorValidator, ProductoValidator,
                          DescuentoValidator, VentaValidator, CompraValidator, CorreccionValidator,
-                         ReembolsoValidator, FaltanteValidator, MAX_INT, MAX_TOTAL)
+                         ReembolsoValidator, FaltanteValidator, FaltanteFiltroValidator, FaltanteResumenFiltroValidator,
+                         ReporteRangoValidator, ReporteTopValidator, ReporteFaltantesValidator, MAX_INT, MAX_TOTAL)
 
 RESOURCES = {
     'categorias': (Categoria, CategoriaValidator), 'clientes': (Cliente, ClienteValidator),
@@ -394,3 +396,213 @@ def create_refund(pk, payload, usuario):
                          retorna_inventario=row['retorna_inventario'], monto=row['monto'])
         for row in detail_rows])
     return reembolso, True
+
+
+# --- Faltantes y demanda no atendida (3.7, RF-150..155) -----------------------
+# Endpoints y servicios propios (no son un recurso mas de RESOURCES): hay que
+# guardar quien registra, filtrar y ofrecer acciones (resolver, resumen). Un
+# faltante es solo informativo (RN-09): NUNCA toca inventario, ventas ni compras.
+
+def faltante_filters(params, resumen=False):
+    """Valida los parametros de consulta (tipo, estado, proveedor, rango de
+    fechas) y los devuelve ya tipados. El resumen no acepta estado."""
+    validator_class = FaltanteResumenFiltroValidator if resumen else FaltanteFiltroValidator
+    validator = validator_class(data={key: value for key, value in params.items()})
+    validator.is_valid(raise_exception=True)
+    return dict(validator.validated_data)
+
+
+def _day_start(day):
+    # make_aware usa la zona horaria del proyecto (settings.TIME_ZONE): "desde" y
+    # "hasta" son dias calendario locales, no UTC.
+    return timezone.make_aware(datetime.combine(day, time.min))
+
+
+def _faltantes_queryset(filters):
+    rows = Faltante.objects.select_related('proveedor', 'producto', 'resuelto_por')
+    if filters.get('tipo'):
+        rows = rows.filter(tipo=filters['tipo'])
+    if filters.get('estado'):
+        rows = rows.filter(estado=filters['estado'])
+    if filters.get('proveedorId'):
+        rows = rows.filter(proveedor_id=filters['proveedorId'])
+    if filters.get('desde'):
+        rows = rows.filter(fecha__gte=_day_start(filters['desde']))
+    if filters.get('hasta'):
+        rows = rows.filter(fecha__lt=_day_start(filters['hasta'] + timedelta(days=1)))
+    return rows
+
+
+def list_faltantes(filters):
+    return _faltantes_queryset(filters).order_by('-fecha', 'pk')
+
+
+@transaction.atomic
+def create_faltante(payload, usuario):
+    """Registra un faltante. Devuelve (faltante, creado). Reenviar el mismo id
+    con los mismos datos es idempotente (no duplica); con otros datos, 409."""
+    lock_writes()
+    validator = FaltanteValidator(data=payload)
+    validator.is_valid(raise_exception=True)
+    data = dict(validator.validated_data)
+    faltante_id = data.pop('id', None)
+    if faltante_id is not None:
+        existing = Faltante.objects.select_related('proveedor', 'resuelto_por').filter(pk=faltante_id).first()
+        if existing is not None:
+            same = (existing.tipo == data['tipo'] and existing.producto_id == (data['producto'].pk if data.get('producto') else None)
+                    and existing.nombre_normalizado == data['nombre_normalizado']
+                    and existing.cantidad_solicitada == data['cantidad_solicitada']
+                    and existing.proveedor_id == (data['proveedor'].pk if data.get('proveedor') else None))
+            if not same:
+                raise Conflict('Ya existe un faltante con ese identificador.')
+            return existing, False
+        data['id'] = faltante_id
+    data['usuario'] = usuario
+    data['usuario_nombre'] = usuario.usuario
+    return Faltante.objects.create(**data), True
+
+
+@transaction.atomic
+def resolve_faltante(pk, usuario):
+    """Marca un faltante como resuelto (RF-154), guardando quien y cuando.
+    Repetirlo no falla ni cambia al primero que lo resolvio."""
+    lock_writes()
+    faltante = Faltante.objects.select_related('proveedor', 'resuelto_por').filter(pk=pk).first()
+    if faltante is None:
+        raise NotFound('El registro no existe.')
+    if faltante.estado != 'resuelto':
+        faltante.estado = 'resuelto'
+        faltante.resuelto_en = timezone.now()
+        faltante.resuelto_por = usuario
+        faltante.save(update_fields=['estado', 'resuelto_en', 'resuelto_por'])
+    return faltante
+
+
+def resumen_faltantes(filters=None, solo_pendientes=True, por_proveedor=True):
+    """Faltantes agrupados para apoyar las compras (RF-155) y, mas adelante,
+    el reporte de faltantes frecuentes. Reutilizable: devuelve una lista de
+    dicts ordenada por veces solicitado (desc), ultima fecha (desc) y nombre.
+
+    Clave de grupo: (id del producto si el faltante es de un producto
+    existente, si no el nombre normalizado -RN-10-) mas el proveedor, porque lo
+    que se necesita para comprar es "que pedirle a quien". Con
+    por_proveedor=False se agrupa solo por producto (reporte de frecuentes) y
+    los campos de proveedor quedan vacios."""
+    filters = dict(filters or {})
+    if solo_pendientes:
+        filters['estado'] = 'pendiente'
+    groups = {}
+    for row in _faltantes_queryset(filters).order_by('fecha', 'pk'):
+        product_key = ('p', row.producto_id) if row.producto_id else ('n', row.nombre_normalizado)
+        group = groups.setdefault((product_key, row.proveedor_id if por_proveedor else None), {
+            'productoId': str(row.producto_id or ''), 'nombre': row.nombre, 'nombreNormalizado': row.nombre_normalizado,
+            'proveedorId': str(row.proveedor_id or '') if por_proveedor else '',
+            'proveedorNombre': row.proveedor.nombre if por_proveedor and row.proveedor_id else '',
+            'vecesSolicitado': 0, 'cantidadTotal': 0, 'ultimaFecha': None, 'estado': 'resuelto'})
+        group['vecesSolicitado'] += 1
+        group['cantidadTotal'] += row.cantidad_solicitada
+        group['ultimaFecha'] = row.fecha  # orden ascendente: la ultima asignacion es la mas reciente.
+        group['nombre'] = row.producto.nombre if row.producto_id else row.nombre
+        if row.estado == 'pendiente':
+            group['estado'] = 'pendiente'
+    result = sorted(groups.values(), key=lambda g: (-g['vecesSolicitado'], -g['ultimaFecha'].timestamp(), g['nombre']))
+    for group in result:
+        group['ultimaFecha'] = group['ultimaFecha'].isoformat()
+    return result
+
+
+# --- Reportes basicos (3.10, RF-160/161; solo administrador) ------------------
+# Solo leen: no modifican nada. Los dias son calendario local (America/Bogota),
+# ambos extremos inclusive, igual que los filtros de faltantes y el historial.
+
+PAYMENT_METHODS = ('Efectivo', 'Nequi', 'Debe')
+
+
+def reporte_filters(params, validator_class):
+    validator = validator_class(data={key: value for key, value in params.items()})
+    validator.is_valid(raise_exception=True)
+    return dict(validator.validated_data)
+
+
+def _ventas_cerradas(filters):
+    # Solo ventas cerradas: una venta abierta todavia no es una venta. Se filtra
+    # por Venta.fecha, la misma que muestra el historial.
+    return Venta.objects.filter(estado='cerrada', fecha__gte=_day_start(filters['desde']),
+                                fecha__lt=_day_start(filters['hasta'] + timedelta(days=1)))
+
+
+def reporte_ventas(filters):
+    """Total vendido, descuentos, reembolsado y neto del rango, con desglose por
+    metodo de pago. "Reembolsado" es lo reembolsado de las ventas del rango (sin
+    importar cuando se hizo el reembolso), asi que neto = vendido - reembolsado
+    cuadra para ese mismo conjunto de ventas. "Debe" cuenta como vendido aunque
+    aun no se haya cobrado."""
+    ventas = _ventas_cerradas(filters)
+    methods = {m: {'metodoPago': m, 'numeroVentas': 0, 'totalVendido': 0, 'totalDescuentos': 0, 'totalReembolsado': 0, 'totalNeto': 0}
+               for m in PAYMENT_METHODS}
+    for row in ventas.values('metodo_pago').annotate(n=Count('pk'), total=Sum('total'), descuentos=Sum('descuento_monto')):
+        item = methods[row['metodo_pago']]
+        item.update(numeroVentas=row['n'], totalVendido=row['total'] or 0, totalDescuentos=row['descuentos'] or 0)
+    for row in Reembolso.objects.filter(venta__in=ventas).values('venta__metodo_pago').annotate(monto=Sum('monto')):
+        methods[row['venta__metodo_pago']]['totalReembolsado'] = row['monto'] or 0
+    rows = list(methods.values())
+    for item in rows:
+        item['totalNeto'] = item['totalVendido'] - item['totalReembolsado']
+    return {'desde': filters['desde'].isoformat(), 'hasta': filters['hasta'].isoformat(),
+            'numeroVentas': sum(r['numeroVentas'] for r in rows), 'totalVendido': sum(r['totalVendido'] for r in rows),
+            'totalDescuentos': sum(r['totalDescuentos'] for r in rows), 'totalReembolsado': sum(r['totalReembolsado'] for r in rows),
+            'totalNeto': sum(r['totalNeto'] for r in rows), 'porMetodoPago': rows}
+
+
+def reporte_productos_mas_vendidos(filters):
+    """Productos ordenados por unidades netas (vendidas - reembolsadas) de las
+    ventas cerradas del rango. Un producto totalmente reembolsado no aparece.
+    "totalProductos" es precio x cantidad antes del descuento de la venta."""
+    ventas = _ventas_cerradas(filters)
+    sold = DetalleVenta.objects.filter(venta__in=ventas).values('producto_id').annotate(
+        unidades=Sum('cantidad'), total=Sum(F('precio') * F('cantidad'), output_field=BigIntegerField()))
+    refunded = {row['producto_id']: row['unidades'] for row in DetalleReembolso.objects.filter(linea__venta__in=ventas)
+                .values('producto_id').annotate(unidades=Sum('cantidad'))}
+    products = Producto.objects.in_bulk([row['producto_id'] for row in sold])
+    rows = []
+    for row in sold:
+        returned = refunded.get(row['producto_id'], 0)
+        net = row['unidades'] - returned
+        if net <= 0:
+            continue
+        product = products[row['producto_id']]
+        rows.append({'productoId': str(product.pk), 'codigo': product.codigo, 'nombre': product.nombre,
+                     'unidadesVendidas': row['unidades'], 'unidadesReembolsadas': returned, 'unidadesNetas': net,
+                     'totalProductos': row['total'] or 0})
+    rows.sort(key=lambda r: (-r['unidadesNetas'], r['nombre']))
+    limit = filters.get('limite', 10)
+    return {'desde': filters['desde'].isoformat(), 'hasta': filters['hasta'].isoformat(), 'limite': limit, 'productos': rows[:limit]}
+
+
+def reporte_compras(filters):
+    """Compras registradas en el rango (la fecha de una compra es un dia, sin hora)."""
+    compras = Compra.objects.filter(fecha__gte=filters['desde'], fecha__lte=filters['hasta']).select_related('proveedor')
+    providers = {}
+    listing = []
+    for compra in compras.order_by('-fecha', 'pk'):
+        group = providers.setdefault(compra.proveedor_id, {'proveedorId': str(compra.proveedor_id), 'proveedorNombre': compra.proveedor.nombre,
+                                                           'numeroCompras': 0, 'totalComprado': 0})
+        group['numeroCompras'] += 1
+        group['totalComprado'] += compra.total
+        listing.append({'id': str(compra.pk), 'fecha': compra.fecha.isoformat(), 'proveedorNombre': compra.proveedor.nombre, 'total': compra.total})
+    return {'desde': filters['desde'].isoformat(), 'hasta': filters['hasta'].isoformat(), 'numeroCompras': len(listing),
+            'totalComprado': sum(item['total'] for item in listing),
+            'porProveedor': sorted(providers.values(), key=lambda g: (-g['totalComprado'], g['proveedorNombre'])), 'compras': listing}
+
+
+def reporte_faltantes_frecuentes(filters):
+    """Productos con mas solicitudes (pendientes y resueltos), agrupados por
+    producto o nombre normalizado, sin separar por proveedor. Rango opcional."""
+    limit = filters.get('limite', 10)
+    range_filters = {key: filters[key] for key in ('desde', 'hasta') if key in filters}
+    rows = resumen_faltantes(range_filters, solo_pendientes=False, por_proveedor=False)
+    return {'desde': filters['desde'].isoformat() if 'desde' in filters else None,
+            'hasta': filters['hasta'].isoformat() if 'hasta' in filters else None, 'limite': limit,
+            'faltantes': [{'productoId': r['productoId'], 'nombre': r['nombre'], 'nombreNormalizado': r['nombreNormalizado'],
+                           'vecesSolicitado': r['vecesSolicitado'], 'cantidadTotal': r['cantidadTotal'],
+                           'ultimaFecha': r['ultimaFecha'], 'estado': r['estado']} for r in rows[:limit]]}

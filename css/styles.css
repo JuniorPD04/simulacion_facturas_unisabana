@@ -1762,3 +1762,29 @@ button:disabled { cursor: wait; opacity: 0.6; }
 }
 
 .nav-logout:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+
+/* Faltantes (3.7). */
+.faltante-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 360px; }
+.faltante-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.pill--tag { min-height: 24px; margin-left: 8px; font-size: 0.72rem; vertical-align: middle; }
+.pill--warn { background: var(--moon-soft); color: #7a5a00; }
+.pill--ok { background: #dcefe4; color: #1d5a3b; }
+.shortage-btn { margin-top: 8px; width: 100%; }
+[data-faltante-section][hidden] { display: none; }
+.catalog-grid > .empty-note, .catalog-grid > .button { grid-column: 1 / -1; justify-self: start; }
+
+/* Reportes (3.10). */
+.report-tabs { grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 760px; }
+.report-presets { flex-wrap: wrap; gap: 8px; }
+.report-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.report-card { display: grid; gap: 4px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.report-card span { color: var(--muted); font-size: 0.8rem; }
+.report-card strong { font-size: 1.25rem; overflow-wrap: anywhere; }
+.report-card .is-bad { color: var(--danger); }
+th.num, td.num { text-align: right; white-space: nowrap; }
+.muted { color: var(--muted); font-size: 0.8rem; }
+@media (max-width: 640px) { .report-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Altas rapidas dentro de la compra. */
+.field .button { justify-self: start; margin-top: 6px; }
+.purchase-picker > .button { margin-top: 8px; }

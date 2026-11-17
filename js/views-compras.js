@@ -8,10 +8,10 @@
   function purchaseForm() {
     if (!draft) draft = newDraft();
     PYL.ui.open({ title: "Nueva compra", size: "lg", html:
-      '<form data-form="purchase"><div class="purchase-form-content"><div class="form-grid"><label class="field">Proveedor<select name="proveedorId" aria-label="Proveedor" data-action="purchase-provider" required>' + c.options("proveedores", draft.proveedorId) + '</select></label>' +
+      '<form data-form="purchase"><div class="purchase-form-content"><div class="form-grid"><label class="field">Proveedor<select name="proveedorId" aria-label="Proveedor" data-action="purchase-provider" required>' + c.options("proveedores", draft.proveedorId) + '</select><button type="button" class="button button--ghost" data-action="purchase-new-provider">Nuevo proveedor</button></label>' +
       c.field("Fecha", "fecha", draft.fecha, "date", 'required data-action="purchase-date"') + '</div>' +
       '<section class="purchase-picker" aria-label="Catalogo de productos"><label class="field" for="purchase-product-search">Buscar productos<input id="purchase-product-search" type="search" autocomplete="off" placeholder="Nombre o codigo" aria-controls="purchase-product-results"></label>' +
-      '<span class="hint" id="purchase-result-count" role="status"></span><ul class="purchase-product-results" id="purchase-product-results"></ul></section>' +
+      '<span class="hint" id="purchase-result-count" role="status"></span><ul class="purchase-product-results" id="purchase-product-results"></ul><button type="button" class="button button--ghost" data-action="purchase-new-product">El producto no existe: registrar producto nuevo</button></section>' +
       '<h4 class="purchase-lines-heading" id="purchase-lines-heading">Productos de la compra</h4><div id="purchase-lines"></div></div><div class="purchase-form-footer"><p class="detail-total" id="purchase-total"></p><p class="error" role="alert" data-form-error></p><div class="modal__actions"><button class="button button--ghost" type="button" data-modal-cancel>Cancelar</button><button class="button button--primary" type="submit">Registrar compra</button></div></div></form>' });
     document.querySelector('[data-form="purchase"]').closest(".modal").classList.add("modal--purchase");
     lines();
@@ -24,6 +24,15 @@
       if (buttons.length === 1) buttons[0].click();
       else if (buttons.length) buttons[0].focus();
     });
+  }
+  // Altas rapidas dentro de la compra (RF-92 y RF-94). El borrador vive en `draft`, asi que al
+  // cerrar el formulario rapido (guardar o cancelar) se vuelve a abrir la compra sin perder nada.
+  function backToPurchase() { if (draft) purchaseForm(); }
+  function quickProviderForm() {
+    PYL.ui.open({ title: "Nuevo proveedor", onClose: backToPurchase, html:
+      '<form data-form="purchase-quick-provider"><div class="stack">' + c.field("Nombre", "nombre", "", "text", "required maxlength=200") +
+      c.field("Telefono", "telefono", "", "tel", "maxlength=80") + c.field("Correo", "correo", "", "email", "maxlength=200") +
+      '</div><p class="error" data-form-error role="alert"></p><div class="modal__actions"><button class="button button--ghost" type="button" data-modal-cancel>Cancelar</button><button class="button button--primary" type="submit">Guardar</button></div></form>' });
   }
   function searchKey(value) {
     return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -90,6 +99,25 @@
         var item = draft.items.find(function (i) { return i.productoId === el.dataset.id; });
         item[action === "purchase-qty" ? "cantidad" : "costo"] = el.value === "" ? NaN : Number(el.value); updateTotal();
       }
+      if (event.type === "submit" && event.target.dataset.form === "purchase-quick-provider") {
+        event.preventDefault();
+        var providerData = Object.fromEntries(new FormData(event.target));
+        await PYL.app.run(async function () {
+          var created = await s.saveEntity("proveedores", providerData, null);
+          draft.proveedorId = created.id; PYL.ui.closeModal(); PYL.ui.toast("Proveedor creado y seleccionado.");
+        }, "Guardando proveedor...");
+        return;
+      }
+      if (event.type === "submit" && event.target.dataset.form === "purchase-quick-product") {
+        event.preventDefault();
+        var productData = Object.fromEntries(new FormData(event.target));
+        await PYL.app.run(async function () {
+          var created = await s.createQuickProduct(productData);
+          draft.items.push({ productoId: created.id, codigo: created.codigo, nombre: created.nombre, cantidad: 1, costo: created.costo });
+          PYL.ui.closeModal(); PYL.ui.toast("Producto creado y agregado a la compra.");
+        }, "Guardando producto...");
+        return;
+      }
       if (event.type === "submit" && event.target.dataset.form === "purchase") {
         event.preventDefault(); draft.proveedorId = event.target.elements.proveedorId.value; draft.fecha = event.target.elements.fecha.value;
         await PYL.app.run(async function () {
@@ -98,6 +126,11 @@
       }
       if (event.type !== "click") return;
       if (action === "new-purchase") purchaseForm();
+      if (action === "purchase-new-provider") quickProviderForm();
+      if (action === "purchase-new-product") {
+        var typed = document.getElementById("purchase-product-search").value.trim();
+        c.quickProductForm({ title: "Producto nuevo", formName: "purchase-quick-product", nombre: typed, onClose: backToPurchase });
+      }
       if (action === "purchase-add") {
         var product = s.getProduct(el.dataset.id);
         if (!product) throw new Error("Selecciona un producto.");

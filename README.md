@@ -92,13 +92,14 @@ Definida en un único lugar, `facturacion/accounts.PERMISSIONS` (recurso + méto
 | `clientes` | CRUD completo | CRUD completo |
 | `productos` | Solo lectura y `PATCH` (edición "en caliente" desde la venta) | CRUD completo |
 | `categorias` | Solo lectura | CRUD completo |
-| `proveedores` | Sin acceso | CRUD completo |
+| `proveedores` | Solo lectura (para elegir proveedor al registrar un faltante; ampliación del mínimo, ver [Faltantes](#faltantes-y-demanda-no-atendida)) | CRUD completo |
 | `compras` | Sin acceso | CRUD completo |
 | `descuentos` | Solo lectura (para aplicarlos en una venta) | CRUD completo |
 | `correcciones` (corregir una venta cerrada, ver [Corrección de ventas cerradas](#corrección-de-ventas-cerradas)) | Sin acceso (403) | Único que puede corregir |
+| `faltantes` (registrar, listar, resumen para compras y marcar como resuelto, ver [Faltantes](#faltantes-y-demanda-no-atendida)) | Todo lo anterior; no se editan ni eliminan | Todo lo anterior; no se editan ni eliminan |
 | `reembolsos` (reembolsar una venta cerrada, ver [Reembolsos](#reembolsos)) | Sin acceso (403); sí puede ver la marca y el detalle en la propia venta | Único que puede crear reembolsos |
 
-El frontend oculta en el menú lo que el rol no puede usar (Compras, Proveedores, Descuentos y las acciones administrativas de Productos/Categorías), pero quien exige el permiso siempre es el backend.
+El frontend oculta en el menú lo que el rol no puede usar (Compras, Descuentos, la pestaña Proveedores de Entidades y las acciones administrativas de Productos/Categorías), pero quien exige el permiso siempre es el backend.
 
 ## Contrato de la API
 
@@ -210,6 +211,53 @@ Body, modo **total** (reembolsa TODO lo que aún quede pendiente de la venta): `
 
 En el frontend, el botón "Reembolsar" solo lo ve un administrador, desde el detalle de una venta cerrada en el historial (se oculta cuando ya no queda nada pendiente, es decir cuando `estadoReembolso` es `"total"`). Abre un modal con una tabla por línea (vendido / ya reembolsado / disponible / cantidad a reembolsar / si retorna al inventario), un botón "Reembolsar todo" que solo llena las cantidades hasta lo disponible, una vista previa informativa del monto (replica la misma fórmula del backend, que es quien manda al confirmar) y un paso de confirmación explícito antes de enviar. El `id` del reembolso se genera al abrir el modal y se reutiliza en reintentos de ese mismo envío (si falla, no se pierde la selección). **Decisión deliberada**: el frontend nunca usa el modo `total` de la API — como ya tiene cargado cuánto queda pendiente de cada línea, "Reembolsar todo" simplemente llena esas cantidades en modo parcial explícito (así cada línea conserva su propio casillero de "retorna al inventario"); el modo `total` queda disponible para otros clientes de la API (cubierto por Postman y por `facturacion/tests.py`) pero la UI no lo necesita.
 
+## Faltantes y demanda no atendida
+
+Un **faltante** deja constancia de algo que un cliente pidió y no se pudo vender: un producto existente **agotado** (`tipo: "agotado"`) o algo que **no está registrado** en el catálogo (`tipo: "no_registrado"`). Sirve para decidir qué comprar (RF-150..155). Es **solo informativo (RN-09)**: registrar o resolver un faltante nunca modifica inventario, ventas ni compras. Ambos roles pueden registrarlo, listarlo, ver el resumen y marcarlo como resuelto; **no se edita ni se elimina** (la API no expone `PUT`/`PATCH`/`DELETE` para faltantes).
+
+Endpoints propios (no son un recurso genérico, porque guardan quién registra y tienen acciones):
+
+| Método y ruta | Qué hace |
+| --- | --- |
+| `POST /api/faltantes/` | Registra un faltante. Campos: `tipo`, `productoId` (obligatorio si es `agotado`, prohibido si es `no_registrado`), `nombre` (obligatorio si es `no_registrado`; en `agotado` se copia del producto), `cantidadSolicitada` (entero ≥ 1), `proveedorId` y `observacion` (máx. 300) opcionales, `id` opcional generado por el cliente. Guarda usuario y fecha. Reenviar el mismo `id` con los mismos datos no lo duplica (200); con otros datos da 409. |
+| `GET /api/faltantes/` | Listado, más reciente primero. Filtros opcionales: `tipo`, `proveedorId`, `estado` (`pendiente`/`resuelto`), `desde` y `hasta` (`AAAA-MM-DD`, días locales de `America/Bogota`, ambos inclusive). Un filtro inválido responde 400. |
+| `GET /api/faltantes/resumen/` | Resumen **para compras**: solo pendientes, agrupados por producto (por id si es un producto existente; si no, por nombre normalizado) y proveedor, con `vecesSolicitado`, `cantidadTotal`, `ultimaFecha` y `estado`. Ordenado por veces solicitado. Acepta los mismos filtros salvo `estado`. |
+| `POST /api/faltantes/<id>/resolver/` | Marca como `resuelto` guardando quién y cuándo. Repetirlo es seguro y no cambia al primero que lo resolvió; un id inexistente da 404. |
+
+**Normalización (RN-10)**: se guarda `nombre_normalizado` (minúsculas, sin tildes, espacios colapsados y plural simple a singular) para que "Cofia", "cofias" y "COFÍAS" cuenten como lo mismo en el resumen. Es una regla simple (`facturacion/normalizacion.py`) y no cubre casos como plurales irregulares ("lápices").
+
+**Integridad**: el faltante conserva el nombre aunque el producto se elimine (`producto` pasa a vacío), y **no se puede eliminar un proveedor con faltantes asociados** (409, como con compras o productos).
+
+**Decisión sobre permisos**: el cajero puede **leer** proveedores para elegirlos al registrar un faltante; crear, editar y eliminar proveedores sigue siendo solo del administrador.
+
+**En el frontend** (menú "Faltantes", visible para ambos roles): la pestaña **Registro** lista los faltantes con filtros (tipo, proveedor, estado, rango de fechas) y permite registrarlos y marcarlos como resueltos; la pestaña **Para compras** muestra el resumen agrupado de pendientes. Desde **Nueva venta** hay dos atajos para registrar un faltante ya relleno: el botón "Agotado: registrar faltante" en la tarjeta de un producto sin stock, y el botón "Registrar «…» como faltante" cuando la búsqueda no encuentra nada. Una insignia "Ya hay stock" avisa cuando un producto agotado pendiente ya tiene existencias. El `id` del faltante se genera al abrir el formulario y se reutiliza en reintentos (no duplica). La pantalla no calcula nada de negocio: filtra y agrupa el backend.
+
+`resumen_faltantes` (`facturacion/services.py`) es una función reutilizable: el reporte de faltantes frecuentes la usa en lugar de repetir la lógica.
+
+## Reportes
+
+Reportes básicos de solo lectura, **solo para administrador** (el cajero recibe 403). Todos son `GET` y no modifican datos. Las fechas van como `YYYY-MM-DD`, son días calendario de Bogotá y el rango incluye ambos extremos; `desde` no puede ser posterior a `hasta` (400).
+
+| Ruta | Parámetros | Qué devuelve |
+| --- | --- | --- |
+| `GET /api/reportes/ventas/` | `desde`, `hasta` (obligatorios) | Número de ventas, total vendido, descuentos, reembolsado y neto, con desglose por método de pago (Efectivo, Nequi, Debe). |
+| `GET /api/reportes/productos-mas-vendidos/` | `desde`, `hasta` (obligatorios), `limite` (1 a 50, por defecto 10) | Productos ordenados por unidades netas (vendidas menos reembolsadas), con el total en productos. |
+| `GET /api/reportes/compras/` | `desde`, `hasta` (obligatorios) | Número y total de compras, desglose por proveedor y lista de compras. |
+| `GET /api/reportes/faltantes/` | `desde`, `hasta` (opcionales), `limite` | Faltantes más pedidos, agrupados por producto o por nombre normalizado. |
+
+Criterios: solo cuentan las ventas **cerradas**, filtradas por la fecha de la venta. "Debe" cuenta como vendido aunque aún no se haya cobrado. El reembolsado es el de las ventas del rango, así que neto = vendido − reembolsado. Un producto reembolsado por completo no aparece en los más vendidos. Las compras se desglosan por proveedor porque no tienen método de pago. Los faltantes frecuentes incluyen pendientes y resueltos, y sin fechas se cuenta todo el historial.
+
+**En el frontend** (menú "Reportes", solo administrador): una pestaña por reporte, con fechas desde/hasta (por defecto hoy) y atajos "Hoy", "Últimos 7 días" y "Este mes". La pantalla no calcula nada: muestra lo que devuelve el backend.
+
+## Opcionales implementados
+
+Valor agregado marcado como "Opcional" en el Anexo A. Todo vive en el frontend (usa los endpoints existentes) y está cubierto por `tests/opcionales.test.cjs`.
+
+- **RF-92 y RF-94, alta rápida desde la compra:** en "Nueva compra" hay un botón "Nuevo proveedor" junto al selector y un botón "El producto no existe: registrar producto nuevo" bajo el buscador. El formulario corto pide solo lo mínimo; al guardar, el proveedor queda seleccionado o el producto se agrega a la compra, sin perder el borrador. El producto se crea con código sugerido, control de inventario y stock 0 (el stock entra con la compra).
+- **RF-157, crear producto desde un faltante:** en Faltantes, los faltantes "No registrado" pendientes (y los grupos sin producto en "Para compras") tienen el botón "Crear producto", con el nombre capturado como base. Solo administrador. Al crear el producto se marcan como resueltos los faltantes "No registrado" pendientes con el mismo nombre normalizado (COFIAS y cofias cuentan igual). No toca inventario ni ventas (RN-09): el producto nace con stock 0.
+- **RF-85, proveedores de un producto:** en Productos, el botón "Proveedores" (administrador) lista los proveedores que ya vendieron ese producto según las compras: número de compras, última fecha y último costo.
+- Ya estaban hechos: RF-16/17 (descartar y limpiar venta), RF-41 (filtros del historial de ventas), RF-101 (filtros del historial de compras) y los desgloses de los reportes por método de pago y por proveedor.
+
 ## SQL independiente
 
 La opción recomendada es `py run.py`, que usa migraciones. Para cargar los archivos manualmente en una **base vacía** de PostgreSQL 18:
@@ -222,7 +270,7 @@ psql -h 127.0.0.1 -U postgres -d papel_y_luna -v ON_ERROR_STOP=1 -1 -f sql/usuar
 py run.py --no-seed
 ```
 
-También puedes ejecutarlos desde Query Tool en pgAdmin. `schema.sql` incluye su propia transacción. No ejecutarlo en una base ya migrada. `schema.sql` ya incluye las tres migraciones (`0001_initial`, `0002_auth` y `0003_descuentos`); como solo la primera es "inicial", `run.py`/`--fake-initial` no detecta solas las demás, por eso el paso manual usa `migrate --fake` (marca las tres como aplicadas sin volver a ejecutarlas) antes de `run.py --no-seed` (los datos y usuarios ya quedaron cargados por los SQL anteriores). `seed_history` evita que el arranque vuelva a insertar ejemplos que hayas eliminado. `seed.sql`/`usuarios_iniciales.sql` pueden ejecutarse varias veces sin actualizar filas existentes; para no restaurar ejemplos eliminados usa los comandos protegidos `manage.py seed`.
+También puedes ejecutarlos desde Query Tool en pgAdmin. `schema.sql` incluye su propia transacción. No ejecutarlo en una base ya migrada. `schema.sql` ya incluye todas las migraciones (`0001_initial` a `0006_faltante`); como solo la primera es "inicial", `run.py`/`--fake-initial` no detecta solas las demás, por eso el paso manual usa `migrate --fake` (marca todas como aplicadas sin volver a ejecutarlas) antes de `run.py --no-seed` (los datos y usuarios ya quedaron cargados por los SQL anteriores). `seed_history` evita que el arranque vuelva a insertar ejemplos que hayas eliminado. `seed.sql`/`usuarios_iniciales.sql` pueden ejecutarse varias veces sin actualizar filas existentes; para no restaurar ejemplos eliminados usa los comandos protegidos `manage.py seed`.
 
 Para regenerar el esquema desde las migraciones:
 
@@ -232,6 +280,7 @@ Para regenerar el esquema desde las migraciones:
 .venv/Scripts/python.exe manage.py sqlmigrate facturacion 0003 | Out-File sql/schema.sql -Encoding utf8 -Append
 .venv/Scripts/python.exe manage.py sqlmigrate facturacion 0004 | Out-File sql/schema.sql -Encoding utf8 -Append
 .venv/Scripts/python.exe manage.py sqlmigrate facturacion 0005 | Out-File sql/schema.sql -Encoding utf8 -Append
+.venv/Scripts/python.exe manage.py sqlmigrate facturacion 0006 | Out-File sql/schema.sql -Encoding utf8 -Append
 ```
 
 ## Demostración y pruebas
@@ -241,10 +290,10 @@ Importa `postman/actividad_10.postman_collection.json` en Postman. Define `baseU
 ```powershell
 postman collection run postman/actividad_10.postman_collection.json --env-var baseUrl=http://127.0.0.1:8000
 .venv/Scripts/python.exe manage.py test facturacion --noinput
-node --test tests/mvp2.test.cjs
+node --test tests/mvp2.test.cjs tests/faltantes.test.cjs tests/reportes.test.cjs tests/opcionales.test.cjs
 ```
 
-Las pruebas Django (98) crean y destruyen una base `test_<DB_NAME>`: el usuario debe poder crear bases. Cubren CRUD, validadores, ambos middlewares, protección de archivos privados, reintentos, rollback, compras simultáneas, login/logout, tokens vencidos o inválidos, la matriz de permisos por rol (parametrizada sobre `accounts.PERMISSIONS`), el catálogo de descuentos (validación, permisos, cálculo porcentual/fijo, rechazo del fijo mayor al subtotal, idempotencia y que editar/eliminar un descuento no altere ventas ya registradas), la corrección de ventas cerradas (permisos, diferencias de inventario, precio/costo congelado, descuento congelado, trazabilidad, concurrencia) y los reembolsos (permisos, parcial/total, monto proporcional sin deriva de redondeo, inventario según `retornaInventario`, idempotencia, concurrencia, rollback atómico y el bloqueo de corrección tras reembolsar). Las pruebas JavaScript (21) conservan la cobertura del store y del backend histórico simulado, agregan la fórmula de descuento, la lógica del ticket (aplicar/reemplazar/quitar, bloqueo cuando el fijo supera el subtotal), el modo corrección, el alta rápida de cliente y la lógica de reembolsos (vista previa, "Reembolsar todo", cantidades acotadas, generación/reuso del UUID); la integración con el backend nuevo se verifica adicionalmente contra HTTP real (inicia sesión primero con el usuario sembrado por `manage.py seed`):
+Las pruebas Django (131) crean y destruyen una base `test_<DB_NAME>`: el usuario debe poder crear bases. Cubren CRUD, validadores, ambos middlewares, protección de archivos privados, reintentos, rollback, compras simultáneas, login/logout, tokens vencidos o inválidos, la matriz de permisos por rol (parametrizada sobre `accounts.PERMISSIONS`), el catálogo de descuentos (validación, permisos, cálculo porcentual/fijo, rechazo del fijo mayor al subtotal, idempotencia y que editar/eliminar un descuento no altere ventas ya registradas), la corrección de ventas cerradas (permisos, diferencias de inventario, precio/costo congelado, descuento congelado, trazabilidad, concurrencia) y los reembolsos (permisos, parcial/total, monto proporcional sin deriva de redondeo, inventario según `retornaInventario`, idempotencia, concurrencia, rollback atómico y el bloqueo de corrección tras reembolsar) y los faltantes (normalización, validaciones, ambos roles, filtros, resolver idempotente, resumen agrupado, RN-09 y la integridad con productos y proveedores) y los reportes (permisos, totales por método de pago, reembolsos, límites del rango por día local, productos más vendidos, compras por proveedor, faltantes frecuentes y que no modifican datos). Las pruebas JavaScript (47) conservan la cobertura del store y del backend histórico simulado, agregan la fórmula de descuento, la lógica del ticket (aplicar/reemplazar/quitar, bloqueo cuando el fijo supera el subtotal), el modo corrección, el alta rápida de cliente la lógica de reembolsos (vista previa, "Reembolsar todo", cantidades acotadas, generación/reuso del UUID) y los faltantes (`tests/faltantes.test.cjs`: validación previa, payload e id reutilizado, URL de filtros, vista Registro/Para compras con escape de HTML, insignia "Ya hay stock" y carga de proveedores para el cajero); la integración con el backend nuevo se verifica adicionalmente contra HTTP real (inicia sesión primero con el usuario sembrado por `manage.py seed`):
 
 ```powershell
 $env:TEST_API_URL='http://127.0.0.1:8000'

@@ -2,7 +2,7 @@
 import json
 from rest_framework import serializers
 from .models import (Categoria, Cliente, Proveedor, Producto, Descuento, DESCUENTO_TIPOS, Venta, Compra,
-                     Faltante, FALTANTE_TIPOS)
+                     Faltante, FALTANTE_TIPOS, FALTANTE_ESTADOS)
 from .normalizacion import normalizar_nombre
 
 MAX_INT = 2147483647
@@ -230,6 +230,9 @@ class FaltanteValidator(StrictInput, serializers.Serializer):
     """Registro de demanda no atendida (3.7/RF-150..155). "agotado" exige un
     producto existente (su nombre se copia tal cual, no es input libre);
     "no_registrado" exige nombre en texto libre y no lleva producto."""
+    # id opcional generado por el cliente: reenviar el mismo registro (doble clic,
+    # reintento tras un corte) no lo duplica, igual que ventas, compras y reembolsos.
+    id = serializers.UUIDField(required=False)
     tipo = serializers.ChoiceField(choices=list(FALTANTE_TIPOS))
     productoId = OptionalClient(source='producto', queryset=Producto.objects.all(), allow_null=True, required=False, pk_field=serializers.UUIDField())
     nombre = serializers.CharField(max_length=150, required=False, allow_blank=True)
@@ -253,6 +256,71 @@ class FaltanteValidator(StrictInput, serializers.Serializer):
             data['nombre'] = nombre
         data['nombre_normalizado'] = normalizar_nombre(data['nombre'])
         data.setdefault('observacion', '')
+        return data
+
+
+class FaltanteFiltroValidator(StrictInput, serializers.Serializer):
+    """Parámetros de consulta de GET /api/faltantes/ (RF-153): tipo y proveedor
+    son el mínimo exigido; estado y rango de fechas son opcionales. desde/hasta
+    son días calendario (inclusive) en la zona horaria del proyecto."""
+    tipo = serializers.ChoiceField(choices=list(FALTANTE_TIPOS), required=False)
+    estado = serializers.ChoiceField(choices=list(FALTANTE_ESTADOS), required=False)
+    proveedorId = serializers.UUIDField(required=False)
+    desde = serializers.DateField(required=False)
+    hasta = serializers.DateField(required=False)
+
+    def validate(self, data):
+        if data.get('desde') and data.get('hasta') and data['desde'] > data['hasta']:
+            raise serializers.ValidationError({'desde': 'La fecha inicial no puede ser posterior a la final.'})
+        return data
+
+
+class FaltanteResumenFiltroValidator(FaltanteFiltroValidator):
+    """El resumen para compras (RF-155) solo considera pendientes: no acepta estado."""
+    estado = None
+
+
+class ReporteRangoValidator(StrictInput, serializers.Serializer):
+    """Rango de dias (inclusive, zona horaria del proyecto) de los reportes de
+    ventas y compras. Ambos extremos son obligatorios; un solo dia (desde == hasta)
+    es el rango minimo valido (3.10)."""
+    desde = serializers.DateField()
+    hasta = serializers.DateField()
+
+    def validate(self, data):
+        if data['desde'] > data['hasta']:
+            raise serializers.ValidationError({'desde': 'La fecha inicial no puede ser posterior a la final.'})
+        return data
+
+
+def _parse_limite(value):
+    # Los parametros de consulta llegan como texto: StrictInput exige int para
+    # IntegerField, asi que "limite" se recibe como texto y se convierte aqui.
+    if not value.isdigit() or not 1 <= int(value) <= 50:
+        raise serializers.ValidationError('El limite debe ser un entero entre 1 y 50.')
+    return int(value)
+
+
+class ReporteTopValidator(ReporteRangoValidator):
+    """Productos mas vendidos: rango obligatorio y limite opcional (10 por defecto)."""
+    limite = serializers.CharField(required=False)
+
+    def validate_limite(self, value):
+        return _parse_limite(value)
+
+
+class ReporteFaltantesValidator(StrictInput, serializers.Serializer):
+    """Faltantes frecuentes: el rango es opcional (sin rango = todo el historial)."""
+    desde = serializers.DateField(required=False)
+    hasta = serializers.DateField(required=False)
+    limite = serializers.CharField(required=False)
+
+    def validate_limite(self, value):
+        return _parse_limite(value)
+
+    def validate(self, data):
+        if data.get('desde') and data.get('hasta') and data['desde'] > data['hasta']:
+            raise serializers.ValidationError({'desde': 'La fecha inicial no puede ser posterior a la final.'})
         return data
 
 

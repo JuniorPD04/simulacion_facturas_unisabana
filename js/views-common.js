@@ -31,13 +31,25 @@
       field("Stock", "stock", p.stock, "number", 'min="0" step="1"' + (p.seguimientoInventario ? " required" : " disabled"))) +
       '</div><p class="error" role="alert" data-form-error></p><div class="modal__actions"><button class="button button--ghost" type="button" data-modal-cancel>Cancelar</button><button class="button button--primary" type="submit">Guardar</button></div></form>' });
   }
+  // Formulario corto para crear un producto desde otro flujo (compra o faltante).
+  // Quien lo abre se encarga del submit (formName) y de que hacer al cerrar (onClose).
+  function quickProductForm(opts) {
+    PYL.ui.open({ title: opts.title || "Nuevo producto", onClose: opts.onClose, html:
+      '<form data-form="' + opts.formName + '"><div class="form-grid">' +
+      field("Nombre", "nombre", opts.nombre || "", "text", "required maxlength=200") +
+      '<label class="field">Categoria<select name="categoriaId" aria-label="Categoria" required>' + options("categorias", "") + '</select></label>' +
+      field("Precio de venta", "precio", "", "number", 'required min="0" step="1"') +
+      field("Costo", "costo", "", "number", 'required min="0" step="1"') +
+      '</div><p class="hint">Se crea con stock 0 y control de inventario. El stock entra al registrar la compra.</p>' +
+      '<p class="error" role="alert" data-form-error></p><div class="modal__actions"><button class="button button--ghost" type="button" data-modal-cancel>Cancelar</button><button class="button button--primary" type="submit">Guardar</button></div></form>' });
+  }
   async function remove(resource, id) {
     var ok = await PYL.ui.confirm({ title: "Eliminar registro", message: "Esta accion eliminara el registro seleccionado.", confirmLabel: "Eliminar", danger: true });
     if (!ok) return;
     await PYL.app.run(async function () { await s.deleteRecord(resource, id); PYL.ui.closeModal(); PYL.app.refresh(); PYL.ui.toast("Registro eliminado."); }, "Eliminando registro...");
   }
   PYL.components = {
-    options: options, field: field, icon: icon, lines: lines, productForm: productForm, remove: remove,
+    options: options, field: field, icon: icon, lines: lines, productForm: productForm, quickProductForm: quickProductForm, remove: remove,
     handle: async function (event) {
       var form = event.target.closest('[data-form="product"]');
       if (!form) return false;
