@@ -43,12 +43,41 @@
     busy = true;
     try { return await fn(); } finally { busy = false; }
   }
-  // El cajero no tiene GET en proveedores/compras (ver facturacion.accounts.PERMISSIONS);
-  // pedirlos igual tumbaria toda la carga por Promise.all. Solo se piden los
-  // recursos que el rol puede leer; los demas quedan vacios.
+  // El cajero no tiene GET en compras (ver facturacion.accounts.PERMISSIONS);
+  // pedirlo igual tumbaria toda la carga por Promise.all. Solo se piden los
+  // recursos que el rol puede leer; los demas quedan vacios. Proveedores si los
+  // puede leer (para elegirlos al registrar un faltante), pero no modificarlos.
   function readableResources() {
     if (PYL.auth.isAdmin()) return PYL.api.resources;
-    return PYL.api.resources.filter(function (r) { return r !== "proveedores" && r !== "compras"; });
+    return PYL.api.resources.filter(function (r) { return r !== "compras"; });
+  }
+  // Faltantes (3.7): se validan aqui lo mismo que en el backend para dar el
+  // mensaje antes de enviar; el backend vuelve a validar y es quien manda.
+  var FALTANTE_TIPOS = ["agotado", "no_registrado"];
+  function faltanteData(data) {
+    var tipo = data.tipo, qty = Number(data.cantidadSolicitada);
+    if (!FALTANTE_TIPOS.includes(tipo)) throw new Error("Selecciona el tipo de faltante.");
+    var value = { id: data.id || crypto.randomUUID(), tipo: tipo };
+    if (tipo === "agotado") {
+      if (!data.productoId) throw new Error("Selecciona el producto agotado.");
+      if (!get("productos", data.productoId)) throw new Error("El producto ya no existe.");
+      value.productoId = data.productoId;
+    } else {
+      var nombre = String(data.nombre || "").trim();
+      if (!nombre) throw new Error("Escribe el nombre del producto solicitado.");
+      if (nombre.length > 150) throw new Error("El nombre no puede superar 150 caracteres.");
+      value.nombre = nombre;
+    }
+    if (data.cantidadSolicitada === "" || data.cantidadSolicitada == null || !Number.isInteger(qty) || qty < 1) throw new Error("La cantidad solicitada debe ser un entero mayor que cero.");
+    value.cantidadSolicitada = qty;
+    if (data.proveedorId) {
+      if (!get("proveedores", data.proveedorId)) throw new Error("El proveedor ya no existe.");
+      value.proveedorId = data.proveedorId;
+    }
+    var observacion = String(data.observacion || "").trim();
+    if (observacion.length > 300) throw new Error("La observacion no puede superar 300 caracteres.");
+    if (observacion) value.observacion = observacion;
+    return value;
   }
   async function load() {
     var readable = readableResources();
@@ -243,6 +272,26 @@
         return clone(p);
       });
     },
+    // RF-85: proveedores asociados a un producto = los que ya se lo vendieron en alguna compra.
+    getProductProviders: function (productId) {
+      var byProvider = {};
+      state.compras.forEach(function (purchase) {
+        purchase.items.forEach(function (item) {
+          if (item.productoId !== productId) return;
+          var row = byProvider[purchase.proveedorId] || (byProvider[purchase.proveedorId] = { proveedorId: purchase.proveedorId, compras: 0, ultimaFecha: "", ultimoCosto: 0 });
+          row.compras += 1;
+          if (String(purchase.fecha) >= row.ultimaFecha) { row.ultimaFecha = String(purchase.fecha); row.ultimoCosto = item.costo; }
+        });
+      });
+      return Object.keys(byProvider).map(function (k) { return byProvider[k]; }).sort(function (a, b) { return b.ultimaFecha.localeCompare(a.ultimaFecha); });
+    },
+    // Alta rapida (RF-94 y RF-157): codigo sugerido y stock 0; el stock entra con la compra.
+    createQuickProduct: function (data) {
+      return exclusive(async function () {
+        var value = productData({ codigo: PYL.store.suggestCode(), nombre: data.nombre, categoriaId: data.categoriaId, precio: data.precio, costo: data.costo, seguimientoInventario: true, stock: 0 }, null);
+        return clone(put("productos", await PYL.api.apiPost("productos", "create", value)));
+      });
+    },
     saveEntity: function (r, data, id) {
       return exclusive(async function () {
         if (!["categorias", "clientes", "proveedores"].includes(r)) throw new Error("Entidad invalida.");
@@ -378,6 +427,39 @@
         return clone(saved);
       });
     },
+    // Faltantes: no viven en state (se consultan con filtros, siempre frescos).
+    // Un faltante es solo informativo (RN-09): no toca inventario ni ventas.
+    // data.id se genera al abrir el formulario y se reutiliza en reintentos.
+    createFaltante: function (data) {
+      return exclusive(async function () { return await PYL.api.apiCreateFaltante(faltanteData(data)); });
+    },
+    resolveFaltante: function (id) {
+      return exclusive(async function () { return await PYL.api.apiResolveFaltante(id); });
+    },
+    // Tras crear el producto de un faltante "No registrado": se resuelven los pendientes que
+    // pidieron lo mismo (mismo nombre normalizado, asi COFIAS y cofias cuentan igual).
+    resolveFaltantesNoRegistrados: function (nombreNormalizado) {
+      return exclusive(async function () {
+        if (!nombreNormalizado) return 0;
+        var pendientes = await PYL.api.apiFaltantes({ tipo: "no_registrado", estado: "pendiente" }, false);
+        var mismos = pendientes.filter(function (f) { return f.nombreNormalizado === nombreNormalizado; });
+        for (var i = 0; i < mismos.length; i++) await PYL.api.apiResolveFaltante(mismos[i].id);
+        return mismos.length;
+      });
+    },
+    // Reportes: solo lectura, siempre frescos desde el backend (nada se guarda en state).
+    // Se valida el rango antes de pedir para dar el mensaje al instante; el backend vuelve a validar.
+    getReporte: function (name, filters) {
+      var needsRange = name !== "faltantes", f = filters || {};
+      if (!["ventas", "productos-mas-vendidos", "compras", "faltantes"].includes(name)) throw new Error("Reporte desconocido.");
+      var isDate = function (v) { return /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(new Date(v + "T00:00:00").getTime()); };
+      if (needsRange && (!f.desde || !f.hasta)) throw new Error("Selecciona la fecha inicial y la final.");
+      if ((f.desde && !isDate(f.desde)) || (f.hasta && !isDate(f.hasta))) throw new Error("Las fechas no son validas.");
+      if (f.desde && f.hasta && f.desde > f.hasta) throw new Error("La fecha inicial no puede ser posterior a la final.");
+      return PYL.api.apiReporte(name, f);
+    },
+    getFaltantes: function (filters) { return PYL.api.apiFaltantes(filters, false); },
+    getFaltantesResumen: function (filters) { return PYL.api.apiFaltantes(filters, true); },
     createPurchase: function (purchase) {
       return exclusive(async function () {
         if (!inventoryFresh) throw new Error("Actualiza los datos antes de registrar otra compra.");

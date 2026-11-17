@@ -280,6 +280,50 @@ class FaltanteResumenFiltroValidator(FaltanteFiltroValidator):
     estado = None
 
 
+class ReporteRangoValidator(StrictInput, serializers.Serializer):
+    """Rango de dias (inclusive, zona horaria del proyecto) de los reportes de
+    ventas y compras. Ambos extremos son obligatorios; un solo dia (desde == hasta)
+    es el rango minimo valido (3.10)."""
+    desde = serializers.DateField()
+    hasta = serializers.DateField()
+
+    def validate(self, data):
+        if data['desde'] > data['hasta']:
+            raise serializers.ValidationError({'desde': 'La fecha inicial no puede ser posterior a la final.'})
+        return data
+
+
+def _parse_limite(value):
+    # Los parametros de consulta llegan como texto: StrictInput exige int para
+    # IntegerField, asi que "limite" se recibe como texto y se convierte aqui.
+    if not value.isdigit() or not 1 <= int(value) <= 50:
+        raise serializers.ValidationError('El limite debe ser un entero entre 1 y 50.')
+    return int(value)
+
+
+class ReporteTopValidator(ReporteRangoValidator):
+    """Productos mas vendidos: rango obligatorio y limite opcional (10 por defecto)."""
+    limite = serializers.CharField(required=False)
+
+    def validate_limite(self, value):
+        return _parse_limite(value)
+
+
+class ReporteFaltantesValidator(StrictInput, serializers.Serializer):
+    """Faltantes frecuentes: el rango es opcional (sin rango = todo el historial)."""
+    desde = serializers.DateField(required=False)
+    hasta = serializers.DateField(required=False)
+    limite = serializers.CharField(required=False)
+
+    def validate_limite(self, value):
+        return _parse_limite(value)
+
+    def validate(self, data):
+        if data.get('desde') and data.get('hasta') and data['desde'] > data['hasta']:
+            raise serializers.ValidationError({'desde': 'La fecha inicial no puede ser posterior a la final.'})
+        return data
+
+
 class CompraValidator(DocumentValidator):
     proveedorId = serializers.PrimaryKeyRelatedField(source='proveedor', queryset=Proveedor.objects.all(), pk_field=serializers.UUIDField())
 

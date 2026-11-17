@@ -16,6 +16,12 @@
     var detail = flattenErrors(result.errors);
     return detail.length ? detail.join(" ") : (result.message || "Error HTTP " + status);
   }
+  // Los filtros vacios no se mandan; el backend responde 400 si alguno es invalido.
+  function queryString(params) {
+    return Object.keys(params || {}).filter(function (k) { return params[k] !== "" && params[k] != null; }).map(function (k) {
+      return encodeURIComponent(k) + "=" + encodeURIComponent(params[k]);
+    }).join("&");
+  }
   async function request(resource, options) {
     var url;
     if (options.path) {
@@ -54,6 +60,25 @@
     },
     apiCorrectSale: async function (ventaId, data) {
       return request("ventas", { method: "POST", path: "ventas/" + encodeURIComponent(ventaId) + "/corregir/", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+    },
+    // Faltantes (3.7): endpoints propios, no forman parte de "resources".
+    // Los filtros vacios no se mandan; el backend responde 400 si alguno es invalido.
+    apiFaltantes: async function (params, resumen) {
+      var query = queryString(params);
+      var data = await request("faltantes", { method: "GET", path: "faltantes/" + (resumen ? "resumen/" : "") + (query ? "?" + query : "") });
+      if (!Array.isArray(data)) throw new Error("La lista recibida no es valida.");
+      return data;
+    },
+    // Reportes (3.10): solo lectura y solo administrador; el backend calcula todo.
+    apiReporte: async function (name, params) {
+      var query = queryString(params);
+      return request("reportes", { method: "GET", path: "reportes/" + encodeURIComponent(name) + "/" + (query ? "?" + query : "") });
+    },
+    apiCreateFaltante: async function (data) {
+      return request("faltantes", { method: "POST", path: "faltantes/", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+    },
+    apiResolveFaltante: async function (id) {
+      return request("faltantes", { method: "POST", path: "faltantes/" + encodeURIComponent(id) + "/resolver/", headers: { "Content-Type": "application/json" }, body: "{}" });
     },
     apiCreateRefund: async function (ventaId, data) {
       return request("ventas", { method: "POST", path: "ventas/" + encodeURIComponent(ventaId) + "/reembolsos/", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });

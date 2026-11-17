@@ -2,7 +2,9 @@
   var PYL = global.PYL, u = PYL.utils, s = PYL.store, c = PYL.components;
   var search = "", category = "", pane = "catalog";
   function productCard(p, addAction) {
-    return '<article class="product-card"><img src="' + u.categoryImage(p.categoriaId) + '" alt=""><div><div class="product-title"><h3>' + u.escapeHtml(p.nombre) + '</h3>' + (addAction === "add-item" ? c.icon("quick-edit", p.id, "Editar " + p.nombre, u.iconPencil()) : "") + '</div><p class="product-card__meta">' + u.escapeHtml(p.codigo + " / " + s.label("categorias", p.categoriaId)) + '</p><strong>' + u.formatCurrency(p.precio) + '</strong><p class="product-card__stock">' + (p.seguimientoInventario ? "Stock: " + p.stock : "Sin control de inventario") + '</p><div class="qty-add"><input type="number" min="1" step="1" value="1" data-qty-for="' + u.escapeHtml(p.id) + '" aria-label="Cantidad de ' + u.escapeHtml(p.nombre) + '"><button class="button button--primary" data-action="' + addAction + '" data-id="' + u.escapeHtml(p.id) + '">Agregar</button></div></div></article>';
+    return '<article class="product-card"><img src="' + u.categoryImage(p.categoriaId) + '" alt=""><div><div class="product-title"><h3>' + u.escapeHtml(p.nombre) + '</h3>' + (addAction === "add-item" ? c.icon("quick-edit", p.id, "Editar " + p.nombre, u.iconPencil()) : "") + '</div><p class="product-card__meta">' + u.escapeHtml(p.codigo + " / " + s.label("categorias", p.categoriaId)) + '</p><strong>' + u.formatCurrency(p.precio) + '</strong><p class="product-card__stock">' + (p.seguimientoInventario ? "Stock: " + p.stock : "Sin control de inventario") + '</p><div class="qty-add"><input type="number" min="1" step="1" value="1" data-qty-for="' + u.escapeHtml(p.id) + '" aria-label="Cantidad de ' + u.escapeHtml(p.nombre) + '"><button class="button button--primary" data-action="' + addAction + '" data-id="' + u.escapeHtml(p.id) + '">Agregar</button></div>' +
+      // RF-151: producto agotado -> atajo para dejar constancia de la demanda (no en modo correccion).
+      (addAction === "add-item" && p.seguimientoInventario && p.stock < 1 ? '<button type="button" class="button button--ghost shortage-btn" data-action="report-shortage" data-product-id="' + u.escapeHtml(p.id) + '">Agotado: registrar faltante</button>' : "") + '</div></article>';
   }
   // RN-08: el descuento se busca y se selecciona como un producto mas, pero se
   // distingue con una insignia y no tiene cantidad ni stock.
@@ -19,7 +21,10 @@
     var discounts = s.isCorrecting() ? [] : s.list("descuentos").filter(function (d) { return d.nombre.toLowerCase().includes(search.toLowerCase()); });
     var addAction = s.isCorrecting() ? "correction-add-item" : "add-item";
     document.getElementById("catalog-grid").innerHTML = (list.length + discounts.length) ?
-      list.map(function (p) { return productCard(p, addAction); }).join("") + discounts.map(discountCard).join("") : '<p class="empty-note">No hay productos con ese criterio.</p>';
+      list.map(function (p) { return productCard(p, addAction); }).join("") + discounts.map(discountCard).join("") :
+      '<p class="empty-note">No hay productos con ese criterio.</p>' +
+      // RF-151: si buscaron algo que no existe, se puede registrar como faltante "no registrado".
+      (search.trim() && !s.isCorrecting() ? '<button type="button" class="button button--ghost" data-action="report-shortage" data-name="' + u.escapeHtml(search.trim().slice(0, 150)) + '">Registrar &laquo;' + u.escapeHtml(search.trim().slice(0, 40)) + '&raquo; como faltante</button>' : "");
     updateCatalogStock();
   }
   function updateCatalogStock() {

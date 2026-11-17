@@ -2,7 +2,7 @@ import io
 import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 from django.db import close_old_connections
 from django.http import HttpResponse, JsonResponse
@@ -1069,6 +1069,10 @@ class FaltanteTests(Fixtures, TestCase):
         self.assertIsNone(data['resueltoEn'])
         faltante = Faltante.objects.get(pk=data['id'])
         self.assertEqual(faltante.nombre_normalizado, 'cofia')
+        # El listado tambien lo expone: el frontend lo usa para resolver los faltantes con el mismo nombre.
+        self.assertEqual(data['nombreNormalizado'], 'cofia')
+        listado = self.client.get('/api/faltantes/?tipo=no_registrado&estado=pendiente').json()['data']
+        self.assertEqual([r['nombreNormalizado'] for r in listado], ['cofia'])
         self.assertEqual(faltante.usuario, self.admin)
 
     def test_registrar_agotado_copia_el_nombre_del_producto(self):
@@ -1251,3 +1255,191 @@ class FaltanteTests(Fixtures, TestCase):
         row = self.client.get('/api/faltantes/').json()['data'][0]
         self.assertEqual((row['nombre'], row['productoId']), ('Cuaderno', ''))
         self.assertEqual(self.resumen()[0]['nombre'], 'Cuaderno')
+
+
+class ReporteTests(Fixtures, TestCase):
+    """Reportes basicos (3.10, RF-160/161): solo administrador, solo lectura."""
+    def setUp(self):
+        super().setUp()
+        Producto.objects.filter(pk=self.product.pk).update(stock=100)
+        self.product2 = Producto.objects.create(codigo='PL-002', nombre='Lapicero', categoria=self.category,
+                                                precio=500, costo=200, stock=100)
+        self.cajero = Usuario(usuario='cajero-rep', rol='cajero')
+        self.cajero.set_password('x')
+        self.cajero.save()
+        self.cajero_client = APIClient()
+        self.cajero_client.force_authenticate(user=self.cajero)
+        self.today = timezone.localdate()
+
+    def local(self, day, hour=12, minute=0, second=0):
+        naive = datetime.combine(day, datetime.min.time()).replace(hour=hour, minute=minute, second=second)
+        return timezone.make_aware(naive).isoformat()
+
+    def make_sale(self, qty=2, metodo='Efectivo', product=None, fecha=None, **extra):
+        product = product or self.product
+        total = qty * product.precio
+        payload = {'fecha': fecha or self.local(self.today), 'estado': 'cerrada', 'clienteId': '', 'metodoPago': metodo,
+                   'valorRecibido': 0 if metodo == 'Debe' else total,
+                   'itemsJson': json.dumps([{'productoId': str(product.pk), 'cantidad': qty}]), **extra}
+        if metodo == 'Debe':
+            payload['clienteId'] = str(self.customer.pk)
+        response = self.client.post('/api/ventas/', payload, format='json')
+        self.assertEqual(response.status_code, 201, response.content)
+        return response.json()['data']
+
+    def report(self, name, client=None, **params):
+        return (client or self.client).get(f'/api/reportes/{name}/', params)
+
+    def data(self, name, **params):
+        response = self.report(name, **params)
+        self.assertEqual(response.status_code, 200, response.content)
+        return response.json()['data']
+
+    def day(self, **kw):
+        return {'desde': self.today.isoformat(), 'hasta': self.today.isoformat(), **kw}
+
+    def test_solo_administrador_y_requiere_autenticacion(self):
+        for name in ('ventas', 'productos-mas-vendidos', 'compras', 'faltantes'):
+            with self.subTest(name=name):
+                self.assertEqual(self.report(name, client=self.cajero_client, **self.day()).status_code, 403)
+                self.assertEqual(self.report(name, client=APIClient(), **self.day()).status_code, 401)
+                self.assertEqual(self.report(name, **self.day()).status_code, 200)
+
+    def test_ventas_totales_por_metodo_y_reembolsos(self):
+        efectivo = self.make_sale(2, 'Efectivo')            # 2000
+        self.make_sale(1, 'Nequi')                          # 1000
+        self.make_sale(1, 'Debe')                           # 1000 (cuenta como vendida)
+        self.make_sale(3, 'Efectivo', estado='abierta', valorRecibido=0)  # abierta: no cuenta
+        refund = self.client.post(f"/api/ventas/{efectivo['id']}/reembolsos/", {'itemsJson': json.dumps(
+            [{'productoId': str(self.product.pk), 'cantidad': 1, 'retornaInventario': True}])}, format='json')
+        self.assertEqual(refund.status_code, 201, refund.content)
+        data = self.data('ventas', **self.day())
+        self.assertEqual((data['numeroVentas'], data['totalVendido'], data['totalReembolsado'], data['totalNeto']), (3, 4000, 1000, 3000))
+        by = {row['metodoPago']: row for row in data['porMetodoPago']}
+        self.assertEqual([row['metodoPago'] for row in data['porMetodoPago']], ['Efectivo', 'Nequi', 'Debe'])
+        self.assertEqual((by['Efectivo']['numeroVentas'], by['Efectivo']['totalVendido'], by['Efectivo']['totalReembolsado'], by['Efectivo']['totalNeto']), (1, 2000, 1000, 1000))
+        self.assertEqual((by['Nequi']['totalVendido'], by['Nequi']['totalNeto']), (1000, 1000))
+        self.assertEqual((by['Debe']['numeroVentas'], by['Debe']['totalVendido']), (1, 1000))
+        self.assertEqual(sum(row['totalNeto'] for row in data['porMetodoPago']), data['totalNeto'])
+
+    def test_ventas_descuentos_se_suman(self):
+        discount = Descuento.objects.create(nombre='10%', tipo='porcentual', valor=10)
+        self.make_sale(2, 'Efectivo', descuentoId=str(discount.pk), valorRecibido=1800)  # 2000 - 200
+        data = self.data('ventas', **self.day())
+        self.assertEqual((data['totalVendido'], data['totalDescuentos']), (1800, 200))
+
+    def test_ventas_limites_del_rango_son_dias_locales_inclusive(self):
+        ayer, manana = self.today - timedelta(days=1), self.today + timedelta(days=1)
+        self.make_sale(1, fecha=self.local(ayer, 23, 59, 59))     # ayer 23:59:59 -> fuera de hoy
+        self.make_sale(1, fecha=self.local(self.today, 0, 0, 0))  # hoy 00:00:00 -> dentro
+        self.make_sale(1, fecha=self.local(self.today, 23, 59, 59))  # hoy 23:59:59 -> dentro
+        self.make_sale(1, fecha=self.local(manana, 0, 0, 0))      # manana 00:00:00 -> fuera
+        self.assertEqual(self.data('ventas', **self.day())['numeroVentas'], 2)
+        self.assertEqual(self.data('ventas', desde=ayer.isoformat(), hasta=manana.isoformat())['numeroVentas'], 4)
+        self.assertEqual(self.data('ventas', desde=ayer.isoformat(), hasta=ayer.isoformat())['numeroVentas'], 1)
+
+    def test_ventas_rango_vacio_devuelve_ceros(self):
+        data = self.data('ventas', **self.day())
+        self.assertEqual((data['numeroVentas'], data['totalVendido'], data['totalNeto']), (0, 0, 0))
+        self.assertEqual(len(data['porMetodoPago']), 3)
+        self.assertTrue(all(row['totalVendido'] == 0 for row in data['porMetodoPago']))
+
+    def test_rangos_invalidos_son_400(self):
+        hoy = self.today.isoformat()
+        casos = [{}, {'desde': hoy}, {'hasta': hoy}, {'desde': 'abc', 'hasta': hoy}, {'desde': '2026-13-45', 'hasta': hoy},
+                 {'desde': hoy, 'hasta': (self.today - timedelta(days=1)).isoformat()}, {**self.day(), 'extra': '1'}]
+        for name in ('ventas', 'compras', 'productos-mas-vendidos'):
+            for params in casos:
+                with self.subTest(name=name, params=params):
+                    self.assertEqual(self.report(name, **params).status_code, 400)
+        self.assertEqual(self.report('ventas', **self.day(limite='5')).status_code, 400)  # ventas no acepta limite
+
+    def test_productos_mas_vendidos_ordena_por_unidades_netas(self):
+        self.make_sale(2, product=self.product)       # Cuaderno x2
+        big = self.make_sale(1, product=self.product2)  # Lapicero x1
+        self.make_sale(4, product=self.product2)      # Lapicero x4 -> 5 en total
+        rows = self.data('productos-mas-vendidos', **self.day())['productos']
+        self.assertEqual([r['nombre'] for r in rows], ['Lapicero', 'Cuaderno'])
+        self.assertEqual((rows[0]['unidadesVendidas'], rows[0]['unidadesNetas'], rows[0]['totalProductos']), (5, 5, 2500))
+        self.assertEqual((rows[1]['codigo'], rows[1]['unidadesVendidas'], rows[1]['totalProductos']), ('PL-001', 2, 2000))
+        refund = self.client.post(f"/api/ventas/{big['id']}/reembolsos/", {'itemsJson': json.dumps(
+            [{'productoId': str(self.product2.pk), 'cantidad': 1, 'retornaInventario': True}])}, format='json')
+        self.assertEqual(refund.status_code, 201, refund.content)
+        rows = self.data('productos-mas-vendidos', **self.day())['productos']
+        self.assertEqual((rows[0]['nombre'], rows[0]['unidadesVendidas'], rows[0]['unidadesReembolsadas'], rows[0]['unidadesNetas']), ('Lapicero', 5, 1, 4))
+
+    def test_productos_totalmente_reembolsados_no_aparecen_y_limite(self):
+        sale = self.make_sale(1, product=self.product2)
+        self.make_sale(1, product=self.product)
+        self.client.post(f"/api/ventas/{sale['id']}/reembolsos/", {'itemsJson': json.dumps(
+            [{'productoId': str(self.product2.pk), 'cantidad': 1, 'retornaInventario': True}])}, format='json')
+        rows = self.data('productos-mas-vendidos', **self.day())['productos']
+        self.assertEqual([r['nombre'] for r in rows], ['Cuaderno'])
+        self.make_sale(1, product=self.product2)
+        self.assertEqual(len(self.data('productos-mas-vendidos', **self.day(limite='1'))['productos']), 1)
+        self.assertEqual(self.data('productos-mas-vendidos', **self.day())['limite'], 10)
+        for bad in ('0', '51', 'abc', '-1', '1.5', ''):
+            with self.subTest(limite=bad):
+                self.assertEqual(self.report('productos-mas-vendidos', **self.day(limite=bad)).status_code, 400)
+
+    def test_productos_mas_vendidos_solo_cuenta_ventas_cerradas_del_rango(self):
+        self.make_sale(1, estado='abierta', valorRecibido=0)
+        self.make_sale(1, fecha=self.local(self.today - timedelta(days=3)))
+        self.assertEqual(self.data('productos-mas-vendidos', **self.day())['productos'], [])
+
+    def test_compras_totales_y_por_proveedor(self):
+        other = Proveedor.objects.create(nombre='Otro')
+        def buy(provider, fecha, qty, costo):
+            response = self.client.post('/api/compras/', {'fecha': fecha.isoformat(), 'proveedorId': str(provider.pk),
+                'itemsJson': json.dumps([{'productoId': str(self.product.pk), 'cantidad': qty, 'costo': costo}])}, format='json')
+            self.assertEqual(response.status_code, 201, response.content)
+        buy(self.provider, self.today, 2, 600)                              # 1200
+        buy(self.provider, self.today, 1, 300)                              # 300
+        buy(other, self.today, 5, 400)                                      # 2000
+        buy(self.provider, self.today - timedelta(days=10), 9, 100)         # fuera del rango
+        data = self.data('compras', **self.day())
+        self.assertEqual((data['numeroCompras'], data['totalComprado']), (3, 3500))
+        self.assertEqual([(g['proveedorNombre'], g['numeroCompras'], g['totalComprado']) for g in data['porProveedor']], [('Otro', 1, 2000), ('Proveedor', 2, 1500)])
+        self.assertEqual(len(data['compras']), 3)
+        self.assertEqual(self.data('compras', desde=(self.today - timedelta(days=10)).isoformat(), hasta=self.today.isoformat())['numeroCompras'], 4)
+        self.assertEqual(self.data('compras', desde=(self.today + timedelta(days=1)).isoformat(), hasta=(self.today + timedelta(days=2)).isoformat())['numeroCompras'], 0)
+
+    def test_faltantes_frecuentes_agrupa_incluye_resueltos_y_no_separa_proveedor(self):
+        def falta(nombre, cantidad=1, **extra):
+            response = self.client.post('/api/faltantes/', {'tipo': 'no_registrado', 'nombre': nombre, 'cantidadSolicitada': cantidad, **extra}, format='json')
+            self.assertEqual(response.status_code, 201, response.content)
+            return response.json()['data']['id']
+        falta('Cofia', 2, proveedorId=str(self.provider.pk))
+        resuelto = falta('cofias', 3)
+        falta('COFÍAS', 1, proveedorId=str(self.provider.pk))
+        falta('Tijeras', 9)
+        self.client.post(f'/api/faltantes/{resuelto}/resolver/', {}, format='json')
+        agotado = self.client.post('/api/faltantes/', {'tipo': 'agotado', 'productoId': str(self.product.pk), 'cantidadSolicitada': 1}, format='json')
+        self.assertEqual(agotado.status_code, 201)
+        rows = self.data('faltantes')['faltantes']
+        self.assertEqual([r['nombreNormalizado'] for r in rows], ['cofia', 'cuaderno', 'tijera'])
+        cofia = rows[0]
+        self.assertEqual((cofia['vecesSolicitado'], cofia['cantidadTotal'], cofia['estado']), (3, 6, 'pendiente'))
+        self.assertNotIn('proveedorId', cofia)
+        self.assertEqual(len(self.data('faltantes', limite='2')['faltantes']), 2)
+        self.assertIsNone(self.data('faltantes')['desde'])
+        # con rango: hoy los incluye; el dia anterior no.
+        self.assertEqual(len(self.data('faltantes', **self.day())['faltantes']), 3)
+        ayer = (self.today - timedelta(days=1)).isoformat()
+        self.assertEqual(self.data('faltantes', desde=ayer, hasta=ayer)['faltantes'], [])
+        for bad in ({'desde': 'x'}, {'desde': self.today.isoformat(), 'hasta': ayer}, {'limite': '0'}, {'extra': '1'}):
+            with self.subTest(params=bad):
+                self.assertEqual(self.report('faltantes', **bad).status_code, 400)
+
+    def test_reportes_no_modifican_nada(self):
+        self.make_sale(2)
+        before = (self.stock(), Venta.objects.count(), Compra.objects.count(), Faltante.objects.count(), Reembolso.objects.count())
+        for name in ('ventas', 'productos-mas-vendidos', 'compras', 'faltantes'):
+            self.data(name, **self.day())
+        self.assertEqual((self.stock(), Venta.objects.count(), Compra.objects.count(), Faltante.objects.count(), Reembolso.objects.count()), before)
+
+    def test_reportes_solo_aceptan_get(self):
+        # La matriz de permisos solo tiene fila GET para 'reportes': cualquier otro metodo se rechaza (403).
+        for method in ('post', 'put', 'patch', 'delete'):
+            with self.subTest(method=method):
+                self.assertIn(getattr(self.client, method)('/api/reportes/ventas/', {}, format='json').status_code, (403, 405))

@@ -20,7 +20,7 @@ def faltante_json(faltante):
     """Faltante (3.7). Las claves son camelCase y sin sufijo _id para sobrevivir
     a SanitizeIdsMiddleware; '' significa "sin relación", como en clienteId."""
     return {'id': str(faltante.pk), 'tipo': faltante.tipo, 'productoId': str(faltante.producto_id or ''),
-            'nombre': faltante.nombre, 'cantidadSolicitada': faltante.cantidad_solicitada,
+            'nombre': faltante.nombre, 'nombreNormalizado': faltante.nombre_normalizado, 'cantidadSolicitada': faltante.cantidad_solicitada,
             'fecha': faltante.fecha.isoformat(), 'proveedorId': str(faltante.proveedor_id or ''),
             'proveedorNombre': faltante.proveedor.nombre if faltante.proveedor_id else '',
             'observacion': faltante.observacion, 'estado': faltante.estado, 'usuario': faltante.usuario_nombre,

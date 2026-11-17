@@ -170,6 +170,20 @@ request('31j Resolver faltante (registra quien y cuando)', 'POST', 'faltantes/{{
 request('31k Resolver otra vez es seguro', 'POST', 'faltantes/{{faltanteId}}/resolver/', 200, {})
 request('31l Faltantes no se pueden eliminar', 'DELETE', 'faltantes/{{faltanteId}}/', 404)
 
+# Reportes (3.10): solo administrador, solo lectura.
+RANGO = 'desde=2000-01-01&hasta=2999-12-31'
+request('32a Reporte de ventas (admin)', 'GET', 'reportes/ventas/?' + RANGO, tests=[
+    'pm.test("Totales y 3 metodos de pago", () => { pm.expect(result.data.totalNeto).to.equal(result.data.totalVendido - result.data.totalReembolsado); pm.expect(result.data.porMetodoPago.length).to.equal(3); });'])
+request('32b Productos mas vendidos con limite', 'GET', 'reportes/productos-mas-vendidos/?' + RANGO + '&limite=3', tests=[
+    'pm.test("Maximo 3 productos", () => pm.expect(result.data.productos.length).to.be.at.most(3));'])
+request('32c Reporte de compras', 'GET', 'reportes/compras/?' + RANGO, tests=[
+    'pm.test("Tiene totales por proveedor", () => { pm.expect(result.data.porProveedor).to.be.an("array"); pm.expect(result.data.compras).to.be.an("array"); });'])
+request('32d Faltantes frecuentes (rango opcional)', 'GET', 'reportes/faltantes/', tests=[
+    'pm.test("Lista de faltantes", () => pm.expect(result.data.faltantes).to.be.an("array"));'])
+request('32e Rango invertido responde 400', 'GET', 'reportes/ventas/?desde=2026-11-10&hasta=2026-11-01', 400)
+request('32f Falta una fecha responde 400', 'GET', 'reportes/ventas/?desde=2026-11-10', 400)
+request('32g Cajero no puede ver reportes', 'GET', 'reportes/ventas/?' + RANGO, 403, token_var='cajeroToken')
+
 request('21 DELETE protege categoria referenciada', 'DELETE', 'categorias/{{categoryId}}/', 409)
 request('22 Crear cliente temporal', 'POST', 'clientes/', 201, {'nombre': 'Temporal {{runId}}'}, tests=[
     'pm.collectionVariables.set("clientId", result.data.id);'])

@@ -19,8 +19,7 @@ CAJERO = frozenset({'cajero'})
 ROLES = ADMIN | CAJERO
 
 # recurso -> método HTTP -> roles permitidos.
-# 'reportes' todavia no tiene modelo ni controlador (fase siguiente); queda
-# lista para cuando se agregue, sin tocar este mapa de nuevo.
+# 'reportes' (3.10): solo lectura y solo administrador; ver controllers/reportes.py.
 PERMISSIONS = {
     'categorias': {'GET': ROLES, 'POST': ADMIN, 'PUT': ADMIN, 'PATCH': ADMIN, 'DELETE': ADMIN},
     'clientes': {'GET': ROLES, 'POST': ROLES, 'PUT': ROLES, 'PATCH': ROLES, 'DELETE': ROLES},

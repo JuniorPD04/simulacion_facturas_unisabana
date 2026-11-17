@@ -2132,6 +2132,185 @@
       ]
     },
     {
+      "name": "32a Reporte de ventas (admin)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/reportes/ventas/?desde=2000-01-01&hasta=2999-12-31"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Totales y 3 metodos de pago\", () => { pm.expect(result.data.totalNeto).to.equal(result.data.totalVendido - result.data.totalReembolsado); pm.expect(result.data.porMetodoPago.length).to.equal(3); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32b Productos mas vendidos con limite",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/reportes/productos-mas-vendidos/?desde=2000-01-01&hasta=2999-12-31&limite=3"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Maximo 3 productos\", () => pm.expect(result.data.productos.length).to.be.at.most(3));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32c Reporte de compras",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/reportes/compras/?desde=2000-01-01&hasta=2999-12-31"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Tiene totales por proveedor\", () => { pm.expect(result.data.porProveedor).to.be.an(\"array\"); pm.expect(result.data.compras).to.be.an(\"array\"); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32d Faltantes frecuentes (rango opcional)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/reportes/faltantes/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const result = pm.response.json();",
+              "pm.test(\"Lista de faltantes\", () => pm.expect(result.data.faltantes).to.be.an(\"array\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32e Rango invertido responde 400",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/reportes/ventas/?desde=2026-11-10&hasta=2026-11-01"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32f Falta una fecha responde 400",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/reportes/ventas/?desde=2026-11-10"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32g Cajero no puede ver reportes",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{cajeroToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/reportes/ventas/?desde=2000-01-01&hasta=2999-12-31"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));",
+              "const result = pm.response.json();"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "21 DELETE protege categoria referenciada",
       "request": {
         "method": "DELETE",

@@ -2,7 +2,7 @@
   var PYL = global.PYL;
   var ready = false, pending = false, loadError = "";
   // Solo UX: el backend (facturacion.accounts.PERMISSIONS) es quien exige el rol.
-  var ADMIN_ONLY_ROUTES = { compras: true, descuentos: true };
+  var ADMIN_ONLY_ROUTES = { compras: true, descuentos: true, reportes: true };
   function route() {
     var parts = (location.hash || "#venta").slice(1).split("/");
     var name = PYL.views[parts[0]] ? parts[0] : "venta";
@@ -80,6 +80,7 @@
       }
       if (!ready) return;
       if (await PYL.components.handle(event)) return;
+      if (PYL.faltantes && await PYL.faltantes.handle(event)) return;
       var view = PYL.views[route().name];
       if (view.handle) await view.handle(event);
     } catch (error) {
