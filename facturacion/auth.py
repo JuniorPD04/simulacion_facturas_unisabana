@@ -77,3 +77,7 @@ class CorreccionPermission(RolePermission):
 
 class ReembolsoPermission(RolePermission):
     resource = 'reembolsos'
+
+
+class FaltantePermission(RolePermission):
+    resource = 'faltantes'

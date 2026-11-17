@@ -1,17 +1,21 @@
+import io
 import json
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from unittest.mock import patch
 from django.db import close_old_connections
 from django.http import HttpResponse, JsonResponse
-from django.test import TestCase, TransactionTestCase, RequestFactory
+from django.test import SimpleTestCase, TestCase, TransactionTestCase, RequestFactory
 from django.utils import timezone
 from django.core.management import call_command
 from rest_framework.test import APIClient
 from . import accounts
 from .middleware import SanitizeIdsMiddleware
+from .normalizacion import normalizar_nombre
+from . import services
 from .models import (Categoria, Producto, Cliente, Proveedor, Descuento, Venta, Compra, RequestLog, Sesion, Usuario,
-                     Reembolso, DetalleReembolso)
+                     Reembolso, DetalleReembolso, Faltante)
 
 
 class Fixtures:
@@ -951,8 +955,12 @@ class AuthTests(TestCase):
             ('GET', 'categorias/', accounts.ROLES),
             ('POST', 'categorias/', accounts.ADMIN),
             ('DELETE', 'categorias/' + f'{self.category.pk}/', accounts.ADMIN),
-            ('GET', 'proveedores/', accounts.ADMIN),
+            # El cajero puede LEER proveedores (elegirlos/filtrarlos al registrar un
+            # faltante, 3.7); crear, editar y eliminar sigue siendo solo del administrador.
+            ('GET', 'proveedores/', accounts.ROLES),
             ('POST', 'proveedores/', accounts.ADMIN),
+            ('GET', 'faltantes/', accounts.ROLES),
+            ('POST', 'faltantes/', accounts.ROLES),
             ('GET', 'productos/', accounts.ROLES),
             ('POST', 'productos/', accounts.ADMIN),
             ('PATCH', 'productos/' + detail, accounts.ROLES),
@@ -1007,3 +1015,239 @@ class AuthTests(TestCase):
         self.client.get('/api/productos/')
         last = RequestLog.objects.filter(path='/api/productos/').latest('id')
         self.assertEqual(last.usuario_id, self.admin.pk)
+
+
+class NormalizacionTests(SimpleTestCase):
+    """RN-10: minusculas, sin tildes, espacios colapsados y plural simple."""
+    def test_ejemplos_de_la_regla(self):
+        casos = [('Cofia', 'cofia'), ('cofias', 'cofia'), ('COFÍAS', 'cofia'), ('  Cofía  ', 'cofia'),
+                 ('colores', 'color'), ('papeles', 'papel'), ('cuadernos', 'cuaderno'), ('tijeras', 'tijera'),
+                 ('Hojas   Blancas', 'hoja blanca'), ('lápiz', 'lapiz'), ('gas', 'gas'), ('', '')]
+        for original, esperado in casos:
+            with self.subTest(original=original):
+                self.assertEqual(normalizar_nombre(original), esperado)
+        self.assertEqual(normalizar_nombre(None), '')
+
+
+class FaltanteTests(Fixtures, TestCase):
+    """Faltantes y demanda no atendida (3.7, RF-150..155, RN-09, RN-10)."""
+    def setUp(self):
+        super().setUp()
+        self.cajero = Usuario(usuario='cajero-falt', rol='cajero')
+        self.cajero.set_password('x')
+        self.cajero.save()
+        self.cajero_client = APIClient()
+        self.cajero_client.force_authenticate(user=self.cajero)
+        self.provider2 = Proveedor.objects.create(nombre='Otro proveedor')
+
+    def register(self, client=None, **extra):
+        payload = {'tipo': 'no_registrado', 'nombre': 'Cofias', 'cantidadSolicitada': 3, **extra}
+        return (client or self.client).post('/api/faltantes/', payload, format='json')
+
+    def register_id(self, **extra):
+        response = self.register(**extra)
+        self.assertEqual(response.status_code, 201, response.content)
+        return response.json()['data']['id']
+
+    def resumen(self, client=None, **params):
+        response = (client or self.client).get('/api/faltantes/resumen/', params)
+        self.assertEqual(response.status_code, 200, response.content)
+        return response.json()['data']
+
+    def test_modelos_sin_migraciones_pendientes(self):
+        # Evita repetir el caso de un modelo agregado sin su migracion.
+        call_command('makemigrations', check=True, dry_run=True, stdout=io.StringIO(), verbosity=0)
+
+    def test_registrar_no_registrado_guarda_usuario_y_nombre_normalizado(self):
+        response = self.register(proveedorId=str(self.provider.pk), observacion='Pidieron azules')
+        self.assertEqual(response.status_code, 201, response.content)
+        data = response.json()['data']
+        self.assertEqual((data['tipo'], data['nombre'], data['cantidadSolicitada'], data['estado']),
+                         ('no_registrado', 'Cofias', 3, 'pendiente'))
+        self.assertEqual((data['usuario'], data['proveedorId'], data['proveedorNombre'], data['productoId']),
+                         ('admin-test', str(self.provider.pk), 'Proveedor', ''))
+        self.assertIsNone(data['resueltoEn'])
+        faltante = Faltante.objects.get(pk=data['id'])
+        self.assertEqual(faltante.nombre_normalizado, 'cofia')
+        self.assertEqual(faltante.usuario, self.admin)
+
+    def test_registrar_agotado_copia_el_nombre_del_producto(self):
+        response = self.register(tipo='agotado', productoId=str(self.product.pk), nombre='lo que sea', cantidadSolicitada=1)
+        self.assertEqual(response.status_code, 201, response.content)
+        data = response.json()['data']
+        self.assertEqual((data['nombre'], data['productoId']), ('Cuaderno', str(self.product.pk)))
+
+    def test_validaciones_rechazadas_sin_guardar_nada(self):
+        base = {'tipo': 'no_registrado', 'nombre': 'X', 'cantidadSolicitada': 1}
+        casos = [
+            {'tipo': 'agotado', 'cantidadSolicitada': 1},                                    # agotado sin producto
+            {'tipo': 'agotado', 'productoId': str(uuid.uuid4()), 'cantidadSolicitada': 1},   # producto inexistente
+            {'tipo': 'no_registrado', 'cantidadSolicitada': 1},                              # sin nombre
+            {**base, 'nombre': '   '},                                                       # nombre en blanco
+            {**base, 'nombre': 'N' * 151},                                                   # nombre demasiado largo
+            {**base, 'productoId': str(self.product.pk)},                                    # no registrado no lleva producto
+            {**base, 'cantidadSolicitada': 0}, {**base, 'cantidadSolicitada': -1},
+            {**base, 'cantidadSolicitada': 1.5}, {**base, 'cantidadSolicitada': True},
+            {**base, 'cantidadSolicitada': '2'}, {**base, 'cantidadSolicitada': 2147483648},
+            {**base, 'tipo': 'otro'},
+            {**base, 'proveedorId': str(uuid.uuid4())},                                      # proveedor inexistente
+            {**base, 'observacion': 'o' * 301},
+            {**base, 'extra': 1},                                                            # campo desconocido
+        ]
+        for payload in casos:
+            with self.subTest(payload=payload):
+                self.assertEqual(self.client.post('/api/faltantes/', payload, format='json').status_code, 400)
+        self.assertEqual(Faltante.objects.count(), 0)
+
+    def test_registro_es_idempotente_por_id(self):
+        faltante_id = str(uuid.uuid4())
+        self.assertEqual(self.register(id=faltante_id).status_code, 201)
+        second = self.register(id=faltante_id)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json()['data']['id'], faltante_id)
+        self.assertEqual(Faltante.objects.count(), 1)
+        self.assertEqual(self.register(id=faltante_id, cantidadSolicitada=9).status_code, 409)
+        self.assertEqual(Faltante.objects.count(), 1)
+
+    def test_sin_autenticacion_401(self):
+        client = APIClient()
+        self.assertEqual(client.get('/api/faltantes/').status_code, 401)
+        self.assertEqual(client.post('/api/faltantes/', {}, format='json').status_code, 401)
+
+    def test_ambos_roles_registran_listan_resumen_y_resuelven(self):
+        created = self.register(self.cajero_client)
+        self.assertEqual(created.status_code, 201, created.content)
+        self.assertEqual(created.json()['data']['usuario'], 'cajero-falt')
+        faltante_id = created.json()['data']['id']
+        self.assertEqual(self.cajero_client.get('/api/faltantes/').status_code, 200)
+        self.assertEqual(len(self.resumen(self.cajero_client)), 1)
+        resolved = self.cajero_client.post(f'/api/faltantes/{faltante_id}/resolver/', {}, format='json')
+        self.assertEqual(resolved.status_code, 200, resolved.content)
+        self.assertEqual(resolved.json()['data']['estado'], 'resuelto')
+        self.assertEqual(resolved.json()['data']['resueltoPor'], 'cajero-falt')
+
+    def test_cajero_lee_proveedores_pero_no_los_modifica(self):
+        self.assertEqual(self.cajero_client.get('/api/proveedores/').status_code, 200)
+        url = f'/api/proveedores/{self.provider.pk}/'
+        for method, path in (('post', '/api/proveedores/'), ('put', url), ('patch', url), ('delete', url)):
+            with self.subTest(method=method):
+                self.assertEqual(getattr(self.cajero_client, method)(path, {'nombre': 'X'}, format='json').status_code, 403)
+        self.assertTrue(Proveedor.objects.filter(pk=self.provider.pk).exists())
+
+    def test_faltantes_no_se_editan_ni_se_eliminan(self):
+        faltante_id = self.register_id()
+        url = f'/api/faltantes/{faltante_id}/'
+        for method in ('put', 'patch', 'delete'):
+            with self.subTest(method=method):
+                self.assertIn(getattr(self.client, method)(url, {'cantidadSolicitada': 9}, format='json').status_code, (404, 405))
+        self.assertEqual(Faltante.objects.get(pk=faltante_id).cantidad_solicitada, 3)
+
+    def test_listado_con_filtros_y_orden(self):
+        now = timezone.now()
+        a = self.register_id(tipo='agotado', productoId=str(self.product.pk), cantidadSolicitada=1, proveedorId=str(self.provider.pk))
+        b = self.register_id(nombre='Cofias', proveedorId=str(self.provider2.pk))
+        c = self.register_id(nombre='Tijeras')
+        Faltante.objects.filter(pk=a).update(fecha=now - timedelta(days=10))
+        Faltante.objects.filter(pk=b).update(fecha=now - timedelta(days=3))
+        self.assertEqual(self.client.post(f'/api/faltantes/{b}/resolver/', {}, format='json').status_code, 200)
+
+        def listado(**params):
+            response = self.client.get('/api/faltantes/', params)
+            self.assertEqual(response.status_code, 200, response.content)
+            return [row['id'] for row in response.json()['data']]
+
+        def dia(moment):
+            return timezone.localtime(moment).date().isoformat()
+
+        self.assertEqual(listado(), [c, b, a])  # mas reciente primero
+        self.assertEqual(set(listado(tipo='agotado')), {a})
+        self.assertEqual(set(listado(tipo='no_registrado')), {b, c})
+        self.assertEqual(set(listado(proveedorId=str(self.provider2.pk))), {b})
+        self.assertEqual(set(listado(estado='resuelto')), {b})
+        self.assertEqual(set(listado(estado='pendiente')), {a, c})
+        self.assertEqual(set(listado(desde=dia(now - timedelta(days=5)))), {b, c})
+        self.assertEqual(set(listado(hasta=dia(now - timedelta(days=5)))), {a})
+        self.assertEqual(set(listado(desde=dia(now - timedelta(days=3)), hasta=dia(now - timedelta(days=3)))), {b})  # rango de un dia, inclusive
+        self.assertEqual(set(listado(tipo='no_registrado', estado='pendiente')), {c})
+
+    def test_filtros_invalidos_son_400(self):
+        for params in ({'tipo': 'otro'}, {'estado': 'x'}, {'proveedorId': 'abc'}, {'desde': '2026-13-45'},
+                       {'desde': '2026-02-01', 'hasta': '2026-01-01'}, {'extra': '1'}):
+            with self.subTest(params=params):
+                self.assertEqual(self.client.get('/api/faltantes/', params).status_code, 400)
+        self.assertEqual(self.client.get('/api/faltantes/resumen/', {'estado': 'pendiente'}).status_code, 400)
+
+    def test_resolver_registra_quien_y_cuando_y_es_idempotente(self):
+        faltante_id = self.register_id()
+        first = self.client.post(f'/api/faltantes/{faltante_id}/resolver/', {}, format='json')
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertEqual((first.json()['data']['estado'], first.json()['data']['resueltoPor']), ('resuelto', 'admin-test'))
+        self.assertIsNotNone(first.json()['data']['resueltoEn'])
+        stamp = Faltante.objects.get(pk=faltante_id).resuelto_en
+        second = self.cajero_client.post(f'/api/faltantes/{faltante_id}/resolver/', {}, format='json')
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json()['data']['resueltoPor'], 'admin-test')  # no cambia al primero que lo resolvio
+        self.assertEqual(Faltante.objects.get(pk=faltante_id).resuelto_en, stamp)
+
+    def test_resolver_inexistente_es_404(self):
+        self.assertEqual(self.client.post(f'/api/faltantes/{uuid.uuid4()}/resolver/', {}, format='json').status_code, 404)
+
+    def test_rn09_no_afecta_inventario_ventas_ni_compras(self):
+        stock, ventas, compras = self.stock(), Venta.objects.count(), Compra.objects.count()
+        faltante_id = self.register_id(tipo='agotado', productoId=str(self.product.pk), cantidadSolicitada=4)
+        self.register_id(nombre='Cofias')
+        self.assertEqual(self.client.post(f'/api/faltantes/{faltante_id}/resolver/', {}, format='json').status_code, 200)
+        self.assertEqual((self.stock(), Venta.objects.count(), Compra.objects.count()), (stock, ventas, compras))
+
+    def test_resumen_agrupa_por_nombre_normalizado(self):
+        for nombre, cantidad in (('cofia', 2), ('Cofias', 3), ('COFÍA', 1)):
+            self.register_id(nombre=nombre, cantidadSolicitada=cantidad)
+        self.register_id(nombre='Tijeras', cantidadSolicitada=7)
+        rows = self.resumen()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]['nombreNormalizado'], 'cofia')  # el mas solicitado primero
+        self.assertEqual((rows[0]['vecesSolicitado'], rows[0]['cantidadTotal'], rows[0]['estado']), (3, 6, 'pendiente'))
+        ultima = Faltante.objects.filter(nombre_normalizado='cofia').order_by('-fecha').first()
+        self.assertEqual(rows[0]['ultimaFecha'], ultima.fecha.isoformat())
+        self.assertEqual((rows[1]['nombreNormalizado'], rows[1]['vecesSolicitado'], rows[1]['cantidadTotal']), ('tijera', 1, 7))
+
+    def test_resumen_agrupa_producto_existente_por_id_y_por_proveedor(self):
+        pid = str(self.product.pk)
+        self.register_id(tipo='agotado', productoId=pid, cantidadSolicitada=1)
+        self.register_id(tipo='agotado', productoId=pid, cantidadSolicitada=2)
+        self.register_id(tipo='agotado', productoId=pid, cantidadSolicitada=4, proveedorId=str(self.provider.pk))
+        rows = self.resumen()
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(r['productoId'] == pid and r['nombre'] == 'Cuaderno' for r in rows))
+        sin_proveedor = next(r for r in rows if not r['proveedorId'])
+        con_proveedor = next(r for r in rows if r['proveedorId'])
+        self.assertEqual((sin_proveedor['vecesSolicitado'], sin_proveedor['cantidadTotal']), (2, 3))
+        self.assertEqual((con_proveedor['vecesSolicitado'], con_proveedor['cantidadTotal'], con_proveedor['proveedorNombre']), (1, 4, 'Proveedor'))
+
+    def test_resumen_solo_pendientes_y_con_filtros(self):
+        self.register_id(nombre='cofia')
+        resuelto = self.register_id(nombre='cofias')
+        self.register_id(tipo='agotado', productoId=str(self.product.pk), cantidadSolicitada=1)
+        self.client.post(f'/api/faltantes/{resuelto}/resolver/', {}, format='json')
+        rows = self.resumen()
+        self.assertEqual({r['nombreNormalizado']: r['vecesSolicitado'] for r in rows}, {'cofia': 1, 'cuaderno': 1})
+        self.assertEqual([r['nombreNormalizado'] for r in self.resumen(tipo='agotado')], ['cuaderno'])
+        self.assertEqual(self.resumen(proveedorId=str(self.provider.pk)), [])
+        # El servicio reutilizable (para reportes) tambien puede incluir los resueltos.
+        todos = {r['nombreNormalizado']: r for r in services.resumen_faltantes(solo_pendientes=False)}
+        self.assertEqual((todos['cofia']['vecesSolicitado'], todos['cofia']['estado']), (2, 'pendiente'))
+
+    def test_eliminar_proveedor_con_faltantes_da_409(self):
+        self.register_id(proveedorId=str(self.provider.pk))
+        self.assertEqual(self.client.delete(f'/api/proveedores/{self.provider.pk}/').status_code, 409)
+        self.assertTrue(Proveedor.objects.filter(pk=self.provider.pk).exists())
+
+    def test_eliminar_producto_con_faltantes_conserva_el_faltante_con_su_nombre(self):
+        faltante_id = self.register_id(tipo='agotado', productoId=str(self.product.pk), cantidadSolicitada=2)
+        self.assertEqual(self.client.delete(f'/api/productos/{self.product.pk}/').status_code, 200)
+        faltante = Faltante.objects.get(pk=faltante_id)
+        self.assertIsNone(faltante.producto)
+        self.assertEqual(faltante.nombre, 'Cuaderno')
+        row = self.client.get('/api/faltantes/').json()['data'][0]
+        self.assertEqual((row['nombre'], row['productoId']), ('Cuaderno', ''))
+        self.assertEqual(self.resumen()[0]['nombre'], 'Cuaderno')

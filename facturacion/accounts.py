@@ -35,7 +35,10 @@ PERMISSIONS = {
     'correcciones': {'GET': ADMIN, 'POST': ADMIN, 'PUT': ADMIN, 'PATCH': ADMIN, 'DELETE': ADMIN},
     'reembolsos': {'GET': ADMIN, 'POST': ADMIN, 'PUT': ADMIN, 'PATCH': ADMIN, 'DELETE': ADMIN},
     'reportes': {'GET': ADMIN},
-    'faltantes': {'GET': ROLES, 'POST': ROLES, 'PUT': ROLES, 'PATCH': ROLES, 'DELETE': ROLES},
+    # Faltantes (3.7): ambos roles registran, listan, ven el resumen y marcan como
+    # resuelto (acción POST .../resolver/). No se pide editar ni eliminar, así que
+    # PUT/PATCH/DELETE no tienen fila (y esas rutas ni siquiera existen).
+    'faltantes': {'GET': ROLES, 'POST': ROLES},
 }
 
 # (recurso, rol, método) -> únicos campos de body permitidos, para roles con

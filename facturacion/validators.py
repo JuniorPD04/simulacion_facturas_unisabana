@@ -2,7 +2,7 @@
 import json
 from rest_framework import serializers
 from .models import (Categoria, Cliente, Proveedor, Producto, Descuento, DESCUENTO_TIPOS, Venta, Compra,
-                     Faltante, FALTANTE_TIPOS)
+                     Faltante, FALTANTE_TIPOS, FALTANTE_ESTADOS)
 from .normalizacion import normalizar_nombre
 
 MAX_INT = 2147483647
@@ -230,6 +230,9 @@ class FaltanteValidator(StrictInput, serializers.Serializer):
     """Registro de demanda no atendida (3.7/RF-150..155). "agotado" exige un
     producto existente (su nombre se copia tal cual, no es input libre);
     "no_registrado" exige nombre en texto libre y no lleva producto."""
+    # id opcional generado por el cliente: reenviar el mismo registro (doble clic,
+    # reintento tras un corte) no lo duplica, igual que ventas, compras y reembolsos.
+    id = serializers.UUIDField(required=False)
     tipo = serializers.ChoiceField(choices=list(FALTANTE_TIPOS))
     productoId = OptionalClient(source='producto', queryset=Producto.objects.all(), allow_null=True, required=False, pk_field=serializers.UUIDField())
     nombre = serializers.CharField(max_length=150, required=False, allow_blank=True)
@@ -254,6 +257,27 @@ class FaltanteValidator(StrictInput, serializers.Serializer):
         data['nombre_normalizado'] = normalizar_nombre(data['nombre'])
         data.setdefault('observacion', '')
         return data
+
+
+class FaltanteFiltroValidator(StrictInput, serializers.Serializer):
+    """Parámetros de consulta de GET /api/faltantes/ (RF-153): tipo y proveedor
+    son el mínimo exigido; estado y rango de fechas son opcionales. desde/hasta
+    son días calendario (inclusive) en la zona horaria del proyecto."""
+    tipo = serializers.ChoiceField(choices=list(FALTANTE_TIPOS), required=False)
+    estado = serializers.ChoiceField(choices=list(FALTANTE_ESTADOS), required=False)
+    proveedorId = serializers.UUIDField(required=False)
+    desde = serializers.DateField(required=False)
+    hasta = serializers.DateField(required=False)
+
+    def validate(self, data):
+        if data.get('desde') and data.get('hasta') and data['desde'] > data['hasta']:
+            raise serializers.ValidationError({'desde': 'La fecha inicial no puede ser posterior a la final.'})
+        return data
+
+
+class FaltanteResumenFiltroValidator(FaltanteFiltroValidator):
+    """El resumen para compras (RF-155) solo considera pendientes: no acepta estado."""
+    estado = None
 
 
 class CompraValidator(DocumentValidator):

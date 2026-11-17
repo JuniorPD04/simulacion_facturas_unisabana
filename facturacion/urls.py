@@ -3,6 +3,7 @@ from .controllers.auth import LoginController, LogoutController, MeController
 from .controllers.resources import ResourceListController, ResourceDetailController
 from .controllers.diagnostics import HealthController, RequestLogsController, SanitizationDemoController
 from .controllers.ventas import CorregirVentaController, ReembolsarVentaController
+from .controllers.faltantes import FaltanteListController, FaltanteResumenController, FaltanteResolverController
 
 urlpatterns = [
     path('health/', HealthController.as_view()),
@@ -13,6 +14,9 @@ urlpatterns = [
     path('auth/me/', MeController.as_view()),
     path('ventas/<uuid:pk>/corregir/', CorregirVentaController.as_view()),
     path('ventas/<uuid:pk>/reembolsos/', ReembolsarVentaController.as_view()),
+    path('faltantes/', FaltanteListController.as_view()),
+    path('faltantes/resumen/', FaltanteResumenController.as_view()),
+    path('faltantes/<uuid:pk>/resolver/', FaltanteResolverController.as_view()),
     path('<str:resource>/', ResourceListController.as_view()),
     path('<str:resource>/<uuid:pk>/', ResourceDetailController.as_view()),
 ]

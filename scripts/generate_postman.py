@@ -144,6 +144,32 @@ request('30i Reembolso total de lo restante (B+C): suma exacta al total (256)', 
 request('30j Corregir queda bloqueada (409) tras el reembolso', 'POST', 'ventas/{{refundSaleId}}/corregir/', 409,
        {'itemsJson': refund_items, 'metodoPago': 'Nequi', 'valorRecibido': 0, 'clienteId': ''})
 
+# Faltantes (3.7, RF-150..155): se usa un nombre unico por corrida para que el
+# resumen agrupado sea reproducible aunque queden faltantes de corridas previas.
+request('31a Registrar faltante no registrado (Cofias)', 'POST', 'faltantes/', 201,
+       {'tipo': 'no_registrado', 'nombre': 'Cofias {{runId}}', 'cantidadSolicitada': 3, 'observacion': 'Pidieron azules'}, tests=[
+    'pm.collectionVariables.set("faltanteId", result.data.id);',
+    'pm.test("Queda pendiente y guarda el usuario", () => { pm.expect(result.data.estado).to.equal("pendiente"); pm.expect(result.data.usuario).to.equal("admin"); });'])
+request('31b Registrar de nuevo el mismo nombre con otra forma (cofia, tilde y plural)', 'POST', 'faltantes/', 201,
+       {'tipo': 'no_registrado', 'nombre': 'COF\u00cdA {{runId}}', 'cantidadSolicitada': 2})
+request('31c Registrar agotado de un producto existente', 'POST', 'faltantes/', 201,
+       {'tipo': 'agotado', 'productoId': '{{productId}}', 'cantidadSolicitada': 1, 'proveedorId': '{{providerId}}'}, tests=[
+    'pm.test("Copia el nombre del producto", () => pm.expect(result.data.nombre).to.equal("Cuaderno Postman"));'])
+request('31d Agotado sin producto rechazado (400)', 'POST', 'faltantes/', 400, {'tipo': 'agotado', 'cantidadSolicitada': 1})
+request('31e Cantidad cero rechazada (400)', 'POST', 'faltantes/', 400, {'tipo': 'no_registrado', 'nombre': 'X', 'cantidadSolicitada': 0})
+request('31f Cajero puede registrar un faltante', 'POST', 'faltantes/', 201,
+       {'tipo': 'no_registrado', 'nombre': 'Tijeras {{runId}}', 'cantidadSolicitada': 1}, token_var='cajeroToken')
+request('31g Listar con filtro por tipo', 'GET', 'faltantes/?tipo=no_registrado', tests=[
+    'pm.test("Solo no registrados", () => result.data.forEach(row => pm.expect(row.tipo).to.equal("no_registrado")));'])
+request('31h Filtro invalido rechazado (400)', 'GET', 'faltantes/?tipo=otro', 400)
+request('31i Resumen para compras agrupa Cofias/COF\u00cdA como un solo producto', 'GET', 'faltantes/resumen/', tests=[
+    'const grupo = result.data.find(row => row.nombreNormalizado === "cofia " + pm.collectionVariables.get("runId"));',
+    'pm.test("Agrupado: 2 veces, 5 unidades", () => { pm.expect(grupo).to.exist; pm.expect(grupo.vecesSolicitado).to.equal(2); pm.expect(grupo.cantidadTotal).to.equal(5); });'])
+request('31j Resolver faltante (registra quien y cuando)', 'POST', 'faltantes/{{faltanteId}}/resolver/', 200, {}, tests=[
+    'pm.test("Resuelto con usuario y fecha", () => { pm.expect(result.data.estado).to.equal("resuelto"); pm.expect(result.data.resueltoPor).to.equal("admin"); pm.expect(result.data.resueltoEn).to.be.a("string"); });'])
+request('31k Resolver otra vez es seguro', 'POST', 'faltantes/{{faltanteId}}/resolver/', 200, {})
+request('31l Faltantes no se pueden eliminar', 'DELETE', 'faltantes/{{faltanteId}}/', 404)
+
 request('21 DELETE protege categoria referenciada', 'DELETE', 'categorias/{{categoryId}}/', 409)
 request('22 Crear cliente temporal', 'POST', 'clientes/', 201, {'nombre': 'Temporal {{runId}}'}, tests=[
     'pm.collectionVariables.set("clientId", result.data.id);'])

@@ -1,5 +1,6 @@
 """Reglas de negocio y transacciones; los controladores no modifican inventario."""
 import uuid
+from datetime import datetime, time, timedelta
 from django.db import connection, transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -9,7 +10,8 @@ from .models import (Categoria, Cliente, Proveedor, Producto, Descuento, Venta, 
                      Reembolso, DetalleReembolso, Faltante)
 from .validators import (CategoriaValidator, ClienteValidator, ProveedorValidator, ProductoValidator,
                          DescuentoValidator, VentaValidator, CompraValidator, CorreccionValidator,
-                         ReembolsoValidator, FaltanteValidator, MAX_INT, MAX_TOTAL)
+                         ReembolsoValidator, FaltanteValidator, FaltanteFiltroValidator, FaltanteResumenFiltroValidator,
+                         MAX_INT, MAX_TOTAL)
 
 RESOURCES = {
     'categorias': (Categoria, CategoriaValidator), 'clientes': (Cliente, ClienteValidator),
@@ -394,3 +396,113 @@ def create_refund(pk, payload, usuario):
                          retorna_inventario=row['retorna_inventario'], monto=row['monto'])
         for row in detail_rows])
     return reembolso, True
+
+
+# --- Faltantes y demanda no atendida (3.7, RF-150..155) -----------------------
+# Endpoints y servicios propios (no son un recurso mas de RESOURCES): hay que
+# guardar quien registra, filtrar y ofrecer acciones (resolver, resumen). Un
+# faltante es solo informativo (RN-09): NUNCA toca inventario, ventas ni compras.
+
+def faltante_filters(params, resumen=False):
+    """Valida los parametros de consulta (tipo, estado, proveedor, rango de
+    fechas) y los devuelve ya tipados. El resumen no acepta estado."""
+    validator_class = FaltanteResumenFiltroValidator if resumen else FaltanteFiltroValidator
+    validator = validator_class(data={key: value for key, value in params.items()})
+    validator.is_valid(raise_exception=True)
+    return dict(validator.validated_data)
+
+
+def _day_start(day):
+    # make_aware usa la zona horaria del proyecto (settings.TIME_ZONE): "desde" y
+    # "hasta" son dias calendario locales, no UTC.
+    return timezone.make_aware(datetime.combine(day, time.min))
+
+
+def _faltantes_queryset(filters):
+    rows = Faltante.objects.select_related('proveedor', 'producto', 'resuelto_por')
+    if filters.get('tipo'):
+        rows = rows.filter(tipo=filters['tipo'])
+    if filters.get('estado'):
+        rows = rows.filter(estado=filters['estado'])
+    if filters.get('proveedorId'):
+        rows = rows.filter(proveedor_id=filters['proveedorId'])
+    if filters.get('desde'):
+        rows = rows.filter(fecha__gte=_day_start(filters['desde']))
+    if filters.get('hasta'):
+        rows = rows.filter(fecha__lt=_day_start(filters['hasta'] + timedelta(days=1)))
+    return rows
+
+
+def list_faltantes(filters):
+    return _faltantes_queryset(filters).order_by('-fecha', 'pk')
+
+
+@transaction.atomic
+def create_faltante(payload, usuario):
+    """Registra un faltante. Devuelve (faltante, creado). Reenviar el mismo id
+    con los mismos datos es idempotente (no duplica); con otros datos, 409."""
+    lock_writes()
+    validator = FaltanteValidator(data=payload)
+    validator.is_valid(raise_exception=True)
+    data = dict(validator.validated_data)
+    faltante_id = data.pop('id', None)
+    if faltante_id is not None:
+        existing = Faltante.objects.select_related('proveedor', 'resuelto_por').filter(pk=faltante_id).first()
+        if existing is not None:
+            same = (existing.tipo == data['tipo'] and existing.producto_id == (data['producto'].pk if data.get('producto') else None)
+                    and existing.nombre_normalizado == data['nombre_normalizado']
+                    and existing.cantidad_solicitada == data['cantidad_solicitada']
+                    and existing.proveedor_id == (data['proveedor'].pk if data.get('proveedor') else None))
+            if not same:
+                raise Conflict('Ya existe un faltante con ese identificador.')
+            return existing, False
+        data['id'] = faltante_id
+    data['usuario'] = usuario
+    data['usuario_nombre'] = usuario.usuario
+    return Faltante.objects.create(**data), True
+
+
+@transaction.atomic
+def resolve_faltante(pk, usuario):
+    """Marca un faltante como resuelto (RF-154), guardando quien y cuando.
+    Repetirlo no falla ni cambia al primero que lo resolvio."""
+    lock_writes()
+    faltante = Faltante.objects.select_related('proveedor', 'resuelto_por').filter(pk=pk).first()
+    if faltante is None:
+        raise NotFound('El registro no existe.')
+    if faltante.estado != 'resuelto':
+        faltante.estado = 'resuelto'
+        faltante.resuelto_en = timezone.now()
+        faltante.resuelto_por = usuario
+        faltante.save(update_fields=['estado', 'resuelto_en', 'resuelto_por'])
+    return faltante
+
+
+def resumen_faltantes(filters=None, solo_pendientes=True):
+    """Faltantes agrupados para apoyar las compras (RF-155) y, mas adelante,
+    el reporte de faltantes frecuentes. Reutilizable: devuelve una lista de
+    dicts ordenada por veces solicitado (desc), ultima fecha (desc) y nombre.
+
+    Clave de grupo: (id del producto si el faltante es de un producto
+    existente, si no el nombre normalizado -RN-10-) mas el proveedor, porque lo
+    que se necesita para comprar es "que pedirle a quien"."""
+    filters = dict(filters or {})
+    if solo_pendientes:
+        filters['estado'] = 'pendiente'
+    groups = {}
+    for row in _faltantes_queryset(filters).order_by('fecha', 'pk'):
+        product_key = ('p', row.producto_id) if row.producto_id else ('n', row.nombre_normalizado)
+        group = groups.setdefault((product_key, row.proveedor_id), {
+            'productoId': str(row.producto_id or ''), 'nombre': row.nombre, 'nombreNormalizado': row.nombre_normalizado,
+            'proveedorId': str(row.proveedor_id or ''), 'proveedorNombre': row.proveedor.nombre if row.proveedor_id else '',
+            'vecesSolicitado': 0, 'cantidadTotal': 0, 'ultimaFecha': None, 'estado': 'resuelto'})
+        group['vecesSolicitado'] += 1
+        group['cantidadTotal'] += row.cantidad_solicitada
+        group['ultimaFecha'] = row.fecha  # orden ascendente: la ultima asignacion es la mas reciente.
+        group['nombre'] = row.producto.nombre if row.producto_id else row.nombre
+        if row.estado == 'pendiente':
+            group['estado'] = 'pendiente'
+    result = sorted(groups.values(), key=lambda g: (-g['vecesSolicitado'], -g['ultimaFecha'].timestamp(), g['nombre']))
+    for group in result:
+        group['ultimaFecha'] = group['ultimaFecha'].isoformat()
+    return result
