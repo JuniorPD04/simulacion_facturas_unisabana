@@ -890,8 +890,9 @@ th.num, td.num { text-align: right; white-space: nowrap; }
 @media (max-width: 719px) {
   /* Menu movil: barra superior con la marca y el boton de tres rayas; los modulos
      se abren en un panel lateral. */
-  .nav { display: flex; flex-direction: row; align-items: center; justify-content: space-between; height: 48px; padding: 0 var(--space-2) 0 var(--space-3); }
+  .nav { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: var(--space-2); height: 48px; padding: 0 var(--space-3) 0 var(--space-2); }
   .nav-toggle {
+    order: -1;
     display: inline-flex;
     align-items: center;
     justify-content: center;

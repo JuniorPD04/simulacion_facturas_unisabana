@@ -18,7 +18,13 @@
         </div>
       </a>
 
-      <nav aria-label="Módulos">
+      <button type="button" class="nav-toggle" data-action="toggle-nav" aria-label="Abrir menú" aria-expanded="false" aria-controls="main-nav">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div class="nav-backdrop" data-action="close-nav"></div>
+
+      <nav id="main-nav" aria-label="Módulos">
+        <div class="nav-drawer-head"><img src="assets/logo.svg" alt=""><span>Papel y Luna</span></div>
         <p class="nav-group">Operación</p>
         <a data-nav="venta" href="#venta"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="20" r="1.2"/><circle cx="18" cy="20" r="1.2"/><path d="M2.5 3.5h2.6l2.2 11h11l2-8H6"/></svg><span>Nueva venta</span></a>
         <a data-nav="historial" href="#historial"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9.5 8h5M9.5 12h5"/></svg><span>Ventas</span></a>

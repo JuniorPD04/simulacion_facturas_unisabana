@@ -9,13 +9,18 @@
     if (ADMIN_ONLY_ROUTES[name] && !PYL.auth.isAdmin()) name = "venta";
     return { name: name, id: parts[1] || "" };
   }
+  function setNav(open) {
+    var nav = document.querySelector(".nav"), btn = document.querySelector('[data-action="toggle-nav"]');
+    if (!nav) return;
+    nav.classList.toggle("is-open", open);
+    if (btn) { btn.setAttribute("aria-expanded", String(open)); btn.setAttribute("aria-label", open ? "Cerrar menú" : "Abrir menú"); }
+  }
   function renderNav(activeName) {
     document.querySelectorAll("[data-nav]").forEach(function (a) {
       var active = a.dataset.nav === activeName || (activeName === "factura" && a.dataset.nav === "historial") || (activeName === "confirmacion" && a.dataset.nav === "venta") || ((activeName === "correccionexitosa" || activeName === "reembolsoexitoso") && a.dataset.nav === "historial");
       a.classList.toggle("is-active", active);
       if (active) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
       if (ADMIN_ONLY_ROUTES[a.dataset.nav]) a.hidden = !PYL.auth.isAdmin();
-      if (active && !a.hidden && global.innerWidth < 720 && a.scrollIntoView) a.scrollIntoView({ inline: "center", block: "nearest" });
     });
   }
   function render() {
@@ -101,8 +106,12 @@
         if (pending) { event.preventDefault(); return; }
         // Los enlaces de navegacion usan el hashchange nativo; "Salir" es una
         // accion, no una ruta, asi que se despacha al manejador central.
-        if (event.target.closest('[data-action="logout"]')) handle(event);
+        if (event.target.closest('[data-action="logout"]')) { setNav(false); handle(event); return; }
+        // Menu movil (tres rayas): abre/cierra el panel; elegir un modulo lo cierra.
+        if (event.target.closest('[data-action="toggle-nav"]')) setNav(!document.querySelector(".nav").classList.contains("is-open"));
+        else if (event.target.closest('[data-action="close-nav"]') || event.target.closest("nav a")) setNav(false);
       });
+      document.addEventListener("keydown", function (event) { if (event.key === "Escape") setNav(false); });
       window.addEventListener("hashchange", function () { PYL.ui.closeModal(); render(); });
       window.addEventListener("beforeunload", function (event) {
         if (pending || (ready && (PYL.store.getCurrentSale().items.length || PYL.store.isCorrecting()))) { event.preventDefault(); event.returnValue = ""; }
