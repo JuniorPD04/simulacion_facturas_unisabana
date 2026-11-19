@@ -179,6 +179,9 @@ table { width: 100%; border-collapse: collapse; }
 }
 .team strong { color: #c3cfdf; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
 
+/* Boton del menu movil: solo existe en pantallas chicas. */
+.nav-toggle, .nav-backdrop, .nav-drawer-head { display: none; }
+
 /* 3. Pagina y encabezados -------------------------------------------------- */
 .view {
   min-width: 0;
@@ -885,42 +888,61 @@ th.num, td.num { text-align: right; white-space: nowrap; }
 
 /* 14. Movil (hasta 719px): catalogo y ticket en pestanas ------------------ */
 @media (max-width: 719px) {
-  /* Menu movil: barra superior fina (marca + salir) y barra de modulos fija abajo,
-     al alcance del pulgar; si hay mas de cinco modulos, se desplaza de lado. */
-  .nav { display: flex; flex-direction: row; align-items: center; justify-content: space-between; height: 48px; padding: 0 var(--space-3); }
+  /* Menu movil: barra superior con la marca y el boton de tres rayas; los modulos
+     se abren en un panel lateral. */
+  .nav { display: flex; flex-direction: row; align-items: center; justify-content: space-between; height: 48px; padding: 0 var(--space-2) 0 var(--space-3); }
+  .nav-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: #fff;
+  }
+  .nav-toggle:hover, .nav.is-open .nav-toggle { background: rgba(255, 255, 255, 0.1); }
+  .nav-toggle svg { width: 24px; height: 24px; }
+  .nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 35;
+    background: rgba(21, 35, 58, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .nav.is-open .nav-backdrop { opacity: 1; pointer-events: auto; }
   .nav nav {
     position: fixed;
-    left: 0;
-    right: 0;
+    top: 0;
     bottom: 0;
-    z-index: 25;
-    gap: 0;
-    padding: 4px 4px calc(4px + env(safe-area-inset-bottom, 0px));
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    background: var(--ink);
-    box-shadow: 0 -4px 16px rgba(21, 35, 58, 0.18);
-    scroll-snap-type: x proximity;
-  }
-  .nav nav a {
-    flex: 1 0 calc(100% / 5.5);
+    left: 0;
+    z-index: 40;
     flex-direction: column;
-    justify-content: center;
-    gap: 3px;
-    min-height: 52px;
-    padding: 6px 2px;
-    font-size: 0.6875rem;
-    text-align: center;
-    scroll-snap-align: center;
+    align-items: stretch;
+    gap: 2px;
+    width: min(290px, 84vw);
+    padding: var(--space-4) var(--space-3) calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+    overflow-x: hidden;
+    overflow-y: auto;
+    background: var(--ink);
+    box-shadow: var(--shadow-pop);
+    transform: translateX(-102%);
+    visibility: hidden;
+    transition: transform 0.22s ease, visibility 0s linear 0.22s;
   }
-  .nav-icon, .nav nav a .nav-icon { display: block; width: 21px; height: 21px; }
-  .nav nav a.is-active { background: transparent; color: #fff; }
-  .nav nav a.is-active::before { left: 22%; right: 22%; top: 0; bottom: auto; height: 3px; width: auto; border-radius: 0 0 3px 3px; }
-  .nav-logout { position: fixed; top: 6px; right: var(--space-3); z-index: 26; width: 36px; min-height: 36px; padding: 0; justify-content: center; margin: 0; }
-  .nav-logout span { display: none; }
-  .nav-logout .nav-icon { width: 20px; height: 20px; }
-  .view { padding-bottom: 88px; }
-  .toast { bottom: 76px; }
-  .view { padding: var(--space-3) var(--space-3) var(--space-5); }
+  .nav.is-open nav { transform: none; visibility: visible; transition: transform 0.22s ease; }
+  .nav nav .nav-group { display: block; }
+  .nav nav a, .nav-logout { width: 100%; min-height: 46px; padding: 0 var(--space-3); font-size: var(--fs-md); }
+  .nav nav a.is-active::before { left: 0; right: auto; top: 10px; bottom: 10px; width: 3px; height: auto; border-radius: 0 3px 3px 0; }
+  .nav-icon, .nav nav a .nav-icon { display: block; width: 20px; height: 20px; }
+  .nav-logout { margin: auto 0 0; border-top: 1px solid rgba(255, 255, 255, 0.1); border-radius: 0; padding-top: var(--space-3); min-height: 54px; }
+  .nav-drawer-head { display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-2) var(--space-4); margin-bottom: var(--space-2); border-bottom: 1px solid rgba(255, 255, 255, 0.1); color: #fff; font-weight: 600; }
+  .nav-drawer-head img { width: 32px; height: 32px; border-radius: 9px; }
   .catalog-panel .panel-head { display: none; }
   .sale-layout { grid-template-columns: 1fr; gap: var(--space-3); }
   .sale-tabs {
@@ -950,7 +972,7 @@ th.num, td.num { text-align: right; white-space: nowrap; }
   .ticket-line { grid-template-columns: minmax(0, 1fr) 56px 72px 28px; }
   .modal-backdrop { padding: var(--space-3); }
   .modal { padding: var(--space-4); }
-  .toast { right: var(--space-3); bottom: 76px; }
+  .toast { right: var(--space-3); bottom: var(--space-3); }
   .sync-bar { justify-content: flex-start; flex-wrap: wrap; }
   .purchase-line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
   .purchase-line-name { grid-column: 1 / -1; }
