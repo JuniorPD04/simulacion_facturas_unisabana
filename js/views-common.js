@@ -20,13 +20,15 @@
   function productForm(id, quick) {
     var p = id ? s.getProduct(id) : { codigo: s.suggestCode(), precio: "", costo: "", stock: 0, seguimientoInventario: true };
     if (!p) throw new Error("El producto ya no existe.");
-    PYL.ui.open({ title: id ? "Editar producto" : "Nuevo producto", size: "lg", html:
-      '<form data-form="product" data-id="' + u.escapeHtml(id || "") + '" data-quick="' + Boolean(quick) + '"><div class="form-grid">' +
+    // El cajero solo puede ajustar el precio desde la venta (el servidor lo exige igual).
+    var priceOnly = Boolean(quick) && !PYL.auth.isAdmin();
+    PYL.ui.open({ title: priceOnly ? "Editar precio" : id ? "Editar producto" : "Nuevo producto", size: priceOnly ? "" : "lg", html:
+      '<form data-form="product" data-id="' + u.escapeHtml(id || "") + '" data-quick="' + Boolean(quick) + '"' + (priceOnly ? ' data-price-only="true"' : "") + '>' + (priceOnly ? '<p class="hint">' + u.escapeHtml(p.nombre) + '</p>' : "") + '<div class="form-grid">' +
       (quick ? "" : field("Codigo", "codigo", p.codigo, "text", "required maxlength=80")) +
-      field("Nombre", "nombre", p.nombre, "text", "required maxlength=200") +
-      '<label class="field">Categoria<select name="categoriaId" aria-label="Categoria" required>' + options("categorias", p.categoriaId) + '</select></label>' +
+      (priceOnly ? "" : field("Nombre", "nombre", p.nombre, "text", "required maxlength=200") +
+      '<label class="field">Categoria<select name="categoriaId" aria-label="Categoria" required>' + options("categorias", p.categoriaId) + '</select></label>') +
       field("Precio de venta", "precio", p.precio, "number", 'required min="0" step="1"') +
-      field("Costo", "costo", p.costo, "number", 'required min="0" step="1"') +
+      (priceOnly ? "" : field("Costo", "costo", p.costo, "number", 'required min="0" step="1"')) +
       (quick ? "" : '<label class="check"><input type="checkbox" name="seguimientoInventario"' + (p.seguimientoInventario ? " checked" : "") + '> Control de inventario</label>' +
       field("Stock", "stock", p.stock, "number", 'min="0" step="1"' + (p.seguimientoInventario ? " required" : " disabled"))) +
       '</div><p class="error" role="alert" data-form-error></p><div class="modal__actions"><button class="button button--ghost" type="button" data-modal-cancel>Cancelar</button><button class="button button--primary" type="submit">Guardar</button></div></form>' });

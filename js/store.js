@@ -266,7 +266,7 @@
         var old = get("productos", id);
         if (quick && !old) throw new Error("El producto ya no existe.");
         var value = productData(quick ? Object.assign({}, old, data, { stock: old.stock, seguimientoInventario: old.seguimientoInventario, codigo: old.codigo }) : data, id);
-        if (quick) value = { id: id, nombre: value.nombre, categoriaId: value.categoriaId, precio: value.precio, costo: value.costo };
+        if (quick) value = PYL.auth.isAdmin() ? { id: id, nombre: value.nombre, categoriaId: value.categoriaId, precio: value.precio, costo: value.costo } : { id: id, precio: value.precio };
         var p = put("productos", await PYL.api.apiPost("productos", id ? "update" : "create", value));
         currentSale.items = currentSale.items.map(function (i) { return i.productoId === p.id ? snapshot(p, i.cantidad) : i; });
         return clone(p);

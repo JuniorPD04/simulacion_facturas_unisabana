@@ -15,6 +15,7 @@
       a.classList.toggle("is-active", active);
       if (active) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
       if (ADMIN_ONLY_ROUTES[a.dataset.nav]) a.hidden = !PYL.auth.isAdmin();
+      if (active && !a.hidden && global.innerWidth < 720 && a.scrollIntoView) a.scrollIntoView({ inline: "center", block: "nearest" });
     });
   }
   function render() {

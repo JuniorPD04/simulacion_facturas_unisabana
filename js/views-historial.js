@@ -90,7 +90,6 @@
     return '<div class="table-wrap"><table class="refund-table"><thead><tr><th>Producto</th><th>Vendido</th><th>Ya reemb.</th><th>Disponible</th><th>Cantidad</th><th title="Retorna al inventario">Retorna</th></tr></thead><tbody>' +
       r.lines.map(refundLineRow).join("") + '</tbody></table></div>' +
       '<div class="refund-preview"><span>Vista previa del monto</span><strong id="refund-preview-amount">' + u.formatCurrency(preview) + '</strong></div>' +
-      '<p class="field-note">Vista previa informativa: el backend vuelve a calcular el monto exacto al confirmar.</p>' +
       '<div class="modal__actions"><button class="button button--ghost" type="button" data-action="refund-fill-all"' + (hasPending ? '' : ' disabled') + '>Reembolsar todo</button>' +
       '<button class="button button--ghost" type="button" data-modal-cancel>Cancelar</button>' +
       '<button class="button button--primary" type="button" data-action="refund-submit"' + (hasSelection ? '' : ' disabled') + '>Reembolsar</button></div>';

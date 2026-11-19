@@ -43,11 +43,11 @@ PERMISSIONS = {
 # (recurso, rol, método) -> únicos campos de body permitidos, para roles con
 # acceso ya concedido en PERMISSIONS pero restringido a un subconjunto de
 # campos. 'id' siempre se permite: identifica el registro, no lo modifica.
-# El cajero solo tiene el formulario rápido de "edición en caliente" desde la
-# venta (nombre, categoría, precio, costo); el stock SOLO cambia por ventas,
-# compras, correcciones y reembolsos, nunca por esta vía.
+# El cajero solo tiene la "edición en caliente" desde la venta, y únicamente
+# del precio; nombre, categoría, costo y stock no puede tocarlos. El stock SOLO
+# cambia por ventas, compras, correcciones y reembolsos, nunca por esta vía.
 FIELD_RESTRICTIONS = {
-    ('productos', 'cajero', 'PATCH'): frozenset({'id', 'nombre', 'categoriaId', 'precio', 'costo'}),
+    ('productos', 'cajero', 'PATCH'): frozenset({'id', 'precio'}),
 }
 
 

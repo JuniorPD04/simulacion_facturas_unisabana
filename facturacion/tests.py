@@ -1001,6 +1001,17 @@ class AuthTests(TestCase):
         self.product.refresh_from_db()
         self.assertEqual(self.product.precio, 1500)
 
+    def test_cajero_solo_puede_cambiar_el_precio_en_edicion_rapida(self):
+        client = APIClient()
+        client.force_authenticate(user=self.cajero)
+        nombre, costo = self.product.nombre, self.product.costo
+        for campo, valor in [('nombre', 'Otro nombre'), ('costo', 1), ('categoriaId', str(self.product.categoria_id))]:
+            response = client.patch(f'/api/productos/{self.product.pk}/', {campo: valor}, format='json')
+            self.assertEqual(response.status_code, 403, campo)
+            self.assertIn(campo, response.json()['message'])
+        self.product.refresh_from_db()
+        self.assertEqual((self.product.nombre, self.product.costo), (nombre, costo))
+
     def test_admin_can_change_stock(self):
         client = APIClient()
         client.force_authenticate(user=self.admin)

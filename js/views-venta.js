@@ -16,9 +16,10 @@
   }
   function catalog() {
     var list = filteredProducts();
-    // Los descuentos no tienen categoria: se filtran solo por texto. No se
-    // ofrecen durante una correccion (RF-50: el descuento no es corregible).
-    var discounts = s.isCorrecting() ? [] : s.list("descuentos").filter(function (d) { return d.nombre.toLowerCase().includes(search.toLowerCase()); });
+    // Los descuentos no tienen categoria: se filtran solo por texto y solo aparecen al buscar
+    // (RN-08); el camino normal es el selector "Descuento" del ticket. No se ofrecen durante
+    // una correccion (RF-50: el descuento no es corregible).
+    var discounts = s.isCorrecting() || !search.trim() ? [] : s.list("descuentos").filter(function (d) { return d.nombre.toLowerCase().includes(search.toLowerCase()); });
     var addAction = s.isCorrecting() ? "correction-add-item" : "add-item";
     document.getElementById("catalog-grid").innerHTML = (list.length + discounts.length) ?
       list.map(function (p) { return productCard(p, addAction); }).join("") + discounts.map(discountCard).join("") :
@@ -62,6 +63,15 @@
     if (save) save.disabled = !sale.items.length || invalid;
     if (pay) pay.disabled = !sale.items.length || invalid;
   }
+  // Selector de descuento del ticket (RF-18): un solo descuento por venta (RN-08).
+  function discountLabel(d) { return d.nombre + " · " + (d.tipo === "porcentual" ? d.valor + " %" : u.formatCurrency(d.valor)); }
+  function discountRow() {
+    var list = s.list("descuentos"), applied = s.getAppliedDiscount();
+    if (!list.length) return '<div class="discount-row"><label class="field">Descuento<select aria-label="Descuento" disabled><option>No hay descuentos</option></select></label></div>';
+    return '<div class="discount-row"><label class="field">Descuento<select data-action="select-discount" aria-label="Descuento"><option value="">Sin descuento</option>' + list.map(function (d) {
+      return '<option value="' + u.escapeHtml(d.id) + '"' + (applied && applied.id === d.id ? " selected" : "") + '>' + u.escapeHtml(discountLabel(d)) + '</option>';
+    }).join("") + '</select></label></div>';
+  }
   function quickClientForm() {
     PYL.ui.open({ title: "Nuevo cliente", html:
       '<form data-form="quick-client"><div class="stack">' + c.field("Nombre", "nombre", "", "text", "required maxlength=200") +
@@ -76,7 +86,7 @@
         var product = s.getProduct(i.productoId);
         var limit = product && product.seguimientoInventario ? ' max="' + product.stock + '"' : "";
         return '<div class="ticket-line"><div><strong>' + u.escapeHtml(i.nombre) + '</strong><span>' + u.formatCurrency(i.precio) + '</span></div><input class="ticket-qty" type="number" min="1" step="1"' + limit + ' data-action="item-qty" data-id="' + u.escapeHtml(i.productoId) + '" value="' + i.cantidad + '" aria-label="Cantidad de ' + u.escapeHtml(i.nombre) + '"><strong class="ticket-sub">' + u.formatCurrency(i.precio * i.cantidad) + '</strong>' + c.icon("remove-item", i.productoId, "Quitar " + i.nombre, u.iconTrash(), true) + '</div>';
-      }).join("") : '<p class="empty-note">Ticket vacio.</p>') + '</div><div class="ticket-actions"><button class="button button--ghost" data-action="clear-sale">Limpiar</button><button class="button button--ghost" data-action="save-sale"' + (!sale.items.length || invalid ? " disabled" : "") + '>Guardar abierta</button><button class="button button--primary" data-action="start-pay"' + (!sale.items.length || invalid ? " disabled" : "") + '>Cobrar</button></div>') +
+      }).join("") : '<p class="empty-note">Ticket vacio.</p>') + '</div>' + discountRow() + '<div class="ticket-actions"><button class="button button--ghost" data-action="clear-sale">Limpiar</button><button class="button button--ghost" data-action="save-sale"' + (!sale.items.length || invalid ? " disabled" : "") + '>Guardar abierta</button><button class="button button--primary" data-action="start-pay"' + (!sale.items.length || invalid ? " disabled" : "") + '>Cobrar</button></div>') +
       '<div id="ticket-totals">' + totalsBlock() + '</div>';
     document.getElementById("sale-layout").dataset.pane = sale.paso === "pago" ? "ticket" : pane;
     var count = document.getElementById("ticket-count");
@@ -157,6 +167,7 @@
       }
       if (event.type === "change") {
         if (action === "client") s.setSaleField("clienteId", el.value);
+        if (action === "select-discount") { if (el.value) s.applyDiscount(el.value); else s.removeDiscount(); ticket(); }
         if (action === "pay-method") { s.setSaleField("metodoPago", el.value); ticket(); }
         if (action === "item-qty") { try { s.updateItemQty(el.dataset.id, el.value); } finally { ticket(); } }
       }
